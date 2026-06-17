@@ -1,0 +1,84 @@
+{
+  "client_impl": {
+    "description": "jmcomic 客户端实现。`html` 网页端 (效率高但可能限制 IP 地区), `api` APP 端 (兼容性更好)",
+    "type": "string",
+    "default": "api",
+    "options": ["html", "api"]
+  },
+  "domain_index": {
+    "description": "使用 jmcomic 内置域名列表中的第几个域名 (0 为第一个)",
+    "type": "int",
+    "default": 0
+  },
+  "custom_domain": {
+    "description": "自定义域名 (可选, 填入后优先于内置域名)。例如: 18comic.vip",
+    "type": "string",
+    "default": ""
+  },
+  "use_proxy": {
+    "description": "是否使用代理",
+    "type": "bool",
+    "default": false
+  },
+  "proxy": {
+    "description": "代理地址, 留空使用系统代理。常见: http://127.0.0.1:7890",
+    "type": "string",
+    "default": ""
+  },
+  "retry_times": {
+    "description": "网络请求重试次数",
+    "type": "int",
+    "default": 3
+  },
+  "image_thread_count": {
+    "description": "同时下载图片数 (网页端建议 ≤ 50)",
+    "type": "int",
+    "default": 16
+  },
+  "photo_thread_count": {
+    "description": "同时下载章节数",
+    "type": "int",
+    "default": 4
+  },
+  "image_suffix": {
+    "description": "图片保存后缀, 留空保持原格式",
+    "type": "string",
+    "default": ".jpg"
+  },
+  "download_subdir": {
+    "description": "在插件数据目录下的下载子目录名",
+    "type": "string",
+    "default": "downloads"
+  },
+  "dir_rule": {
+    "description": "下载目录命名规则 (DSL)。Bd=根目录, Axxx=本子属性, Pxxx=章节属性。常用: Bd / Atitle",
+    "type": "string",
+    "default": "Bd / Atitle / Ptitle"
+  },
+  "max_search_results": {
+    "description": "单次搜索结果最大显示条数",
+    "type": "int",
+    "default": 10
+  },
+  "auto_send_cover": {
+    "description": "查询本子详情时是否自动发送封面图",
+    "type": "bool",
+    "default": true
+  },
+  "enable_login": {
+    "description": "是否登录 (访问收藏夹 / 高清原图时可能需要)",
+    "type": "bool",
+    "default": false
+  },
+  "username": {
+    "description": "jmcomic 登录账号 (邮箱)",
+    "type": "string",
+    "default": ""
+  },
+  "password": {
+    "description": "jmcomic 登录密码",
+    "type": "string",
+    "default": "",
+    "secret": true
+  }
+}
