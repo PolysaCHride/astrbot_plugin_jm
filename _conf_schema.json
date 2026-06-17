@@ -5,11 +5,6 @@
     "default": "api",
     "options": ["html", "api"]
   },
-  "domain_index": {
-    "description": "使用 jmcomic 内置域名列表中的第几个域名 (0 为第一个)",
-    "type": "int",
-    "default": 0
-  },
   "custom_domain": {
     "description": "自定义域名 (可选, 填入后优先于内置域名)。例如: 18comic.vip",
     "type": "string",

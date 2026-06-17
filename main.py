@@ -14,9 +14,8 @@ from typing import Any, Iterable, Optional
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.config import AstrBotConfig
-from astrbot.core.star.star_tools import StarTools
 
 import jmcomic
 
@@ -64,10 +63,13 @@ class JMPlugin(Star):
         self.config = config
 
         # 数据目录 (绝对路径, 由 StarTools 自动创建)
-        # 注: v4.22.2 中 Context.get_data_dir() 不存在, 应使用 StarTools.get_data_dir()
+        # 注: Context.get_data_dir() 不存在, 应使用 StarTools.get_data_dir()
         #     (PR #1194 引入的标准化接口)
         try:
-            self.data_dir: Path = Path(StarTools.get_data_dir())
+            try:
+                self.data_dir: Path = Path(StarTools.get_data_dir(self.name))
+            except TypeError:
+                self.data_dir = Path(StarTools.get_data_dir())
         except Exception:  # noqa: BLE001
             # 兜底: 拼接标准路径 (兼容无 StarTools.get_data_dir 的旧版本)
             from astrbot.core.utils.astrbot_path import get_astrbot_data_path
@@ -78,6 +80,7 @@ class JMPlugin(Star):
         self.option: Optional[jmcomic.JmOption] = None
         self._option_lock = asyncio.Lock()
         self._logged_in: bool = False
+        self._background_tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -92,6 +95,11 @@ class JMPlugin(Star):
 
     async def terminate(self) -> None:
         """插件卸载时调用."""
+        for task in tuple(self._background_tasks):
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
         logger.info("[JM] 插件已卸载")
 
     # ------------------------------------------------------------------ #
@@ -169,7 +177,11 @@ class JMPlugin(Star):
 
     def _resolve_download_dir(self) -> Path:
         sub = (self.config.get("download_subdir") or "downloads").strip() or "downloads"
-        d = self.data_dir / sub
+        base_dir = self.data_dir.resolve()
+        d = (base_dir / sub).resolve()
+        if d != base_dir and base_dir not in d.parents:
+            logger.warning("[JM] download_subdir 越出插件数据目录, 已回退到 downloads")
+            d = base_dir / "downloads"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -180,7 +192,7 @@ class JMPlugin(Star):
         return self.option
 
     async def _maybe_login(self, client) -> None:
-        if not self.config.get("enable_login", False) or self._logged_in:
+        if not self.config.get("enable_login", False):
             return
         username = (self.config.get("username") or "").strip()
         password = (self.config.get("password") or "").strip()
@@ -191,6 +203,7 @@ class JMPlugin(Star):
             self._logged_in = True
             logger.info("[JM] 登录成功")
         except Exception as e:  # noqa: BLE001
+            self._logged_in = False
             logger.error(f"[JM] 登录失败: {e}")
 
     # ------------------------------------------------------------------ #
@@ -663,7 +676,9 @@ class JMPlugin(Star):
                 except Exception:  # noqa: BLE001
                     pass
 
-        asyncio.create_task(_task())
+        task = asyncio.create_task(_task())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
         event.stop_event()
 
     # ------------------------------------------------------------------ #
@@ -770,21 +785,24 @@ class JMPlugin(Star):
 
     async def _zip_to_send(self, files: Iterable[Path], base_dir: Path, aid: str) -> Optional[str]:
         """把下载的图片打包成 zip 返回临时路径, 失败返回 None."""
-        try:
-            tmp = Path(tempfile.gettempdir())
-            zip_path = tmp / f"jm_{aid}_{int(time.time())}.zip"
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for p in files:
-                    if not p.exists():
-                        continue
-                    try:
-                        arcname = str(p.relative_to(base_dir))
-                    except ValueError:
-                        arcname = p.name
-                    zf.write(p, arcname)
-            if not zip_path.exists() or zip_path.stat().st_size == 0:
+        def _make_zip() -> Optional[str]:
+            try:
+                tmp = Path(tempfile.gettempdir())
+                zip_path = tmp / f"jm_{aid}_{int(time.time())}.zip"
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for p in files:
+                        if not p.exists():
+                            continue
+                        try:
+                            arcname = str(p.relative_to(base_dir))
+                        except ValueError:
+                            arcname = p.name
+                        zf.write(p, arcname)
+                if not zip_path.exists() or zip_path.stat().st_size == 0:
+                    return None
+                return str(zip_path)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[JM] 打包 zip 失败: {e}", exc_info=True)
                 return None
-            return str(zip_path)
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"[JM] 打包 zip 失败: {e}", exc_info=True)
-            return None
+
+        return await asyncio.to_thread(_make_zip)
