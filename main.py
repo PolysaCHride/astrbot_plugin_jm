@@ -75,6 +75,12 @@ class JMPlugin(Star):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"[JM] 数据目录: {self.data_dir}")
 
+        # 启动时构建 jmcomic option
+        self.option: Optional[jmcomic.JmOption] = None
+        self._option_lock = asyncio.Lock()
+        self._logged_in: bool = False
+        self._background_tasks: set[asyncio.Task] = set()
+
     def _resolve_data_dir(self) -> Path:
         """解析插件数据目录. 优先读取 custom_data_dir 配置项."""
         cfg = self.config
@@ -91,17 +97,26 @@ class JMPlugin(Star):
             from astrbot.core.utils.astrbot_path import get_astrbot_data_path
             return Path(get_astrbot_data_path()) / "plugin_data" / self.name
 
-        # 启动时构建 jmcomic option
-        self.option: Optional[jmcomic.JmOption] = None
-        self._option_lock = asyncio.Lock()
-        self._logged_in: bool = False
-        self._background_tasks: set[asyncio.Task] = set()
-
     # ------------------------------------------------------------------ #
     # 生命周期
     # ------------------------------------------------------------------ #
+    def _ensure_runtime_attrs(self) -> None:
+        """补齐运行期属性, 兼容热重载时旧实例未完整初始化的情况."""
+        if not hasattr(self, "option"):
+            self.option = None
+        if not hasattr(self, "_option_lock"):
+            self._option_lock = asyncio.Lock()
+        if not hasattr(self, "_logged_in"):
+            self._logged_in = False
+        if not hasattr(self, "_background_tasks"):
+            self._background_tasks = set()
+        if not hasattr(self, "data_dir"):
+            self.data_dir = self._resolve_data_dir()
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+
     async def initialize(self) -> None:
         """AstrBot 在加载本插件后会调用一次."""
+        self._ensure_runtime_attrs()
         try:
             await self._rebuild_option(initial=True)
         except Exception as e:  # noqa: BLE001
@@ -110,6 +125,7 @@ class JMPlugin(Star):
 
     async def terminate(self) -> None:
         """插件卸载时调用."""
+        self._ensure_runtime_attrs()
         for task in tuple(self._background_tasks):
             task.cancel()
         if self._background_tasks:
@@ -128,6 +144,7 @@ class JMPlugin(Star):
         - 老版本只有 ``create_option_by_file``, 因此这里统一把 dict 写
           成 YAML 临时文件再用 ``create_option_by_file`` 加载, 两种环境都能跑
         """
+        self._ensure_runtime_attrs()
         async with self._option_lock:
             opt = self._build_option_dict()
             download_dir = self._resolve_download_dir()
@@ -226,12 +243,14 @@ class JMPlugin(Star):
         return d
 
     async def _ensure_option(self) -> jmcomic.JmOption:
+        self._ensure_runtime_attrs()
         if self.option is None:
             await self._rebuild_option()
         assert self.option is not None
         return self.option
 
     async def _maybe_login(self, client) -> None:
+        self._ensure_runtime_attrs()
         if not self.config.get("enable_login", False):
             return
         username = (self.config.get("username") or "").strip()
@@ -604,6 +623,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     @jm_group.command("download", alias={"下载", "d"})
     async def jm_download(self, event: AstrMessageEvent, args: str = ""):
+        self._ensure_runtime_attrs()
         joined = (args or "").strip()
         aid = extract_id(joined)
         if not aid:
