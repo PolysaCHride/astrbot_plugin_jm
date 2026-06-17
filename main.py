@@ -17,6 +17,8 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.config import AstrBotConfig
 
+import yaml
+
 import jmcomic
 
 # 本子 / 章节 ID 都是纯数字字符串
@@ -106,13 +108,38 @@ class JMPlugin(Star):
     # Option 管理
     # ------------------------------------------------------------------ #
     async def _rebuild_option(self, initial: bool = False) -> jmcomic.JmOption:
-        """根据当前 plugin_config 重建 jmcomic option."""
+        """根据当前 plugin_config 重建 jmcomic option.
+
+        兼容性说明:
+        - 新版 jmcomic (>=2.5?) 提供了 ``create_option_by_dict`` 直接吃 dict
+        - 老版本只有 ``create_option_by_file``, 因此这里统一把 dict 写
+          成 YAML 临时文件再用 ``create_option_by_file`` 加载, 两种环境都能跑
+        """
         async with self._option_lock:
             opt = self._build_option_dict()
             download_dir = self._resolve_download_dir()
             opt.setdefault("dir_rule", {})
             opt["dir_rule"]["base_dir"] = str(download_dir)
-            option = jmcomic.create_option_by_dict(opt)
+
+            # 优先尝试 create_option_by_dict (新版 jmcomic 才有, 性能更好)
+            option = None
+            if hasattr(jmcomic, "create_option_by_dict"):
+                try:
+                    option = jmcomic.create_option_by_dict(opt)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[JM] create_option_by_dict 失败, 回退到 YAML 文件方式: {e}")
+
+            if option is None:
+                # 兜底: 写 YAML 文件, 用 create_option_by_file 加载
+                opt_file = self.data_dir / ".option.yml"
+                try:
+                    with open(opt_file, "w", encoding="utf-8") as f:
+                        yaml.safe_dump(opt, f, allow_unicode=True, sort_keys=False)
+                    option = jmcomic.create_option_by_file(str(opt_file))
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"[JM] create_option_by_file 也失败, 退回到默认 option: {e}")
+                    option = jmcomic.JmOption.default()
+
             self.option = option
             if not initial:
                 logger.info("[JM] option 已重建")
