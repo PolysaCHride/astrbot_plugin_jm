@@ -60,6 +60,11 @@
     "type": "int",
     "default": 10
   },
+  "max_forward_images": {
+    "description": "合并聊天记录单次最多发送的图片数。0 表示不限制；下载整本时建议保留限制, 避免平台消息过大导致发送失败",
+    "type": "int",
+    "default": 200
+  },
   "auto_send_cover": {
     "description": "查询本子详情时是否自动发送封面图",
     "type": "bool",

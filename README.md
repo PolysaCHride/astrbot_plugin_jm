@@ -18,7 +18,7 @@ MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 - 📖 本子详情 + 封面图
 - 📑 章节列表
 - 🏆 排行榜 (日 / 周 / 月)
-- ⏬ 异步下载, 完成后自动推送 zip 压缩包
+- ⏬ 异步下载, 完成后以合并聊天记录推送漫画图集
 - 🌐 支持 HTTP 代理 / 自定义域名 / 客户端实现切换 (html / api)
 - 👤 登录后访问收藏夹 / 高清原图 (可选)
 
@@ -76,6 +76,7 @@ pip install jmcomic PyYAML
 | `download_subdir` | `downloads` | 数据目录下的下载子目录名 |
 | `dir_rule` | `Bd / Atitle / Ptitle` | 下载目录命名规则 (jmcomic DSL) |
 | `max_search_results` | `10` | 搜索结果最大显示条数 |
+| `max_forward_images` | `200` | 合并聊天记录单次最多发送图片数, `0` 表示不限制 |
 | `auto_send_cover` | `true` | 查询本子详情时是否自动发送封面图 |
 | `enable_login` | `false` | 是否登录 |
 | `username` | 空 | jmcomic 登录账号 (邮箱) |
@@ -99,8 +100,8 @@ astrbot_plugin_jm/
 
 - 第一次执行 `/jm download` 时会初始化 jmcomic option, 可能需要数秒.
 - 由于 jmcomic 是同步阻塞库, 所有网络 / 文件 IO 都通过 `asyncio.to_thread` 包装到线程池, 不会阻塞 AstrBot 主事件循环.
-- 下载完成后会通过 `self.context.send_message(umo, chain)` 主动推送 zip 文件到原始会话.
-- 部分平台 (如微信公众号) 不支持发送文件, 此时 zip 推送会失败, 改为告知用户本地下载目录.
+- 下载完成后会参考 `astrbot_plugin_parser` 的 `Node` / `Nodes` 方式, 通过合并聊天记录主动推送漫画图集到原始会话.
+- 若一次下载图片过多, 会按 `max_forward_images` 截断发送, 图片文件仍保留在下载目录.
 
 ## License
 

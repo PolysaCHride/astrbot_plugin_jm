@@ -6,7 +6,6 @@ import asyncio
 import os
 import re
 import time
-import zipfile
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -14,6 +13,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
+from astrbot.core.message.components import Image, Node, Nodes, Plain
 from astrbot.core.config import AstrBotConfig
 
 import yaml
@@ -79,8 +79,6 @@ class JMPlugin(Star):
         self._option_lock = asyncio.Lock()
         self._logged_in: bool = False
         self._background_tasks: set[asyncio.Task] = set()
-        self.package_dir: Path = self.data_dir / "packages"
-        self.package_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_data_dir(self) -> Path:
         """解析插件数据目录. 优先读取 custom_data_dir 配置项."""
@@ -114,14 +112,10 @@ class JMPlugin(Star):
         if not hasattr(self, "data_dir"):
             self.data_dir = self._resolve_data_dir()
             self.data_dir.mkdir(parents=True, exist_ok=True)
-        if not hasattr(self, "package_dir"):
-            self.package_dir = self.data_dir / "packages"
-            self.package_dir.mkdir(parents=True, exist_ok=True)
 
     async def initialize(self) -> None:
         """AstrBot 在加载本插件后会调用一次."""
         self._ensure_runtime_attrs()
-        await self._cleanup_old_packages()
         try:
             await self._rebuild_option(initial=True)
         except Exception as e:  # noqa: BLE001
@@ -279,14 +273,6 @@ class JMPlugin(Star):
         candidates.append(self.data_dir)
         candidates.append(self._docker_host_mapped_path(self.data_dir))
         return self._unique_paths(candidates)
-
-    def _package_dir_for(self, base_dir: Path) -> Path:
-        """让 zip 包落在实际扫描到的目录旁边, 提高跨容器发送文件的可见性."""
-        base_dir = base_dir.resolve()
-        download_subdir = (self.config.get("download_subdir") or "downloads").strip() or "downloads"
-        if base_dir.name == download_subdir:
-            return base_dir.parent / "packages"
-        return base_dir / "packages"
 
     async def _ensure_option(self) -> jmcomic.JmOption:
         self._ensure_runtime_attrs()
@@ -697,6 +683,7 @@ class JMPlugin(Star):
         )
 
         umo = event.unified_msg_origin
+        self_id = event.get_self_id()
 
         async def _task():
             try:
@@ -796,34 +783,22 @@ class JMPlugin(Star):
                 )
 
                 if downloaded:
-                    # 用第一个有效扫描根作为 zip 内部相对路径基准
-                    base_for_zip = scanned_roots[0] if scanned_roots else fallback_root
-                    zip_path = await self._zip_to_send(downloaded, base_for_zip, aid)
-                    if zip_path:
-                        from astrbot.api.event import MessageChain
-
-                        # 注意: context.send_message 期望 MessageChain 对象,
-                        #       不是原生 list. 通过 chain=[...] 包装一层
-                        message_chain = MessageChain(
-                            chain=[
-                                Comp.Plain(f"📦 已打包: {os.path.basename(zip_path)}"),
-                                Comp.File(
-                                    file=str(zip_path),
-                                    name=os.path.basename(zip_path),
-                                ),
-                            ]
+                    base_for_forward = scanned_roots[0] if scanned_roots else fallback_root
+                    try:
+                        await self._send_images_as_forward(
+                            umo,
+                            self_id,
+                            downloaded,
+                            aid,
+                            base_for_forward,
                         )
-                        try:
-                            await self.context.send_message(umo, message_chain)
-                        except Exception as e:  # noqa: BLE001
-                            logger.error(f"[JM] 推送 zip 失败: {e}")
-                            await self._send_to(
-                                umo,
-                                f"❌ 推送文件失败: {e}\n"
-                                f"zip 已保留在: {zip_path}",
-                            )
-                    else:
-                        await self._send_to(umo, f"📁 下载目录: {scanned_roots[0] if scanned_roots else fallback_root}")
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"[JM] 推送合并转发图集失败: {e}", exc_info=True)
+                        await self._send_to(
+                            umo,
+                            f"❌ 推送合并转发图集失败: {e}\n"
+                            f"图片已保留在: {base_for_forward}",
+                        )
                 else:
                     tried = ", ".join(str(p) for p in roots_to_try)
                     await self._send_to(umo, f"⚠️ 未发现本次下载的图片文件, 尝试过的目录: {tried}")
@@ -943,54 +918,52 @@ class JMPlugin(Star):
         chain = MessageChain().message(text)
         await self.context.send_message(umo, chain)
 
-    async def _zip_to_send(self, files: Iterable[Path], base_dir: Path, aid: str) -> Optional[str]:
-        """把下载的图片打包成 zip 返回临时路径, 失败返回 None."""
-        def _make_zip() -> Optional[str]:
-            try:
-                package_dir = self._package_dir_for(base_dir)
-                package_dir.mkdir(parents=True, exist_ok=True)
-                zip_path = package_dir / f"jm_{aid}_{int(time.time())}.zip"
-                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for p in files:
-                        if not p.exists():
-                            continue
-                        try:
-                            arcname = str(p.relative_to(base_dir))
-                        except ValueError:
-                            arcname = p.name
-                        zf.write(p, arcname)
-                if not zip_path.exists() or zip_path.stat().st_size == 0:
-                    return None
-                return str(zip_path)
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"[JM] 打包 zip 失败: {e}", exc_info=True)
-                return None
+    def _path_sort_key(self, path: Path) -> list[Any]:
+        """自然排序路径, 避免 10.jpg 排在 2.jpg 前面."""
+        try:
+            text = str(path.relative_to(path.anchor))
+        except ValueError:
+            text = str(path)
+        parts = re.split(r"(\d+)", text)
+        return [int(part) if part.isdigit() else part.lower() for part in parts]
 
-        return await asyncio.to_thread(_make_zip)
+    async def _send_images_as_forward(
+        self,
+        umo: str,
+        self_id: str,
+        files: Iterable[Path],
+        aid: str,
+        base_dir: Path,
+    ) -> None:
+        """参考 astrbot_plugin_parser 的 Node/Nodes 方式发送合并转发图集."""
+        from astrbot.api.event import MessageChain
 
-    async def _cleanup_old_packages(self) -> None:
-        """清理旧 zip 包. 不在发送后立刻删除, 避免平台延迟读取时报 ENOENT."""
-        self._ensure_runtime_attrs()
+        images = sorted(
+            [p for p in files if p.exists() and p.is_file()],
+            key=self._path_sort_key,
+        )
+        max_images = int(self.config.get("max_forward_images", 200) or 0)
+        omitted = 0
+        if max_images > 0 and len(images) > max_images:
+            omitted = len(images) - max_images
+            images = images[:max_images]
 
-        def _cleanup() -> None:
-            try:
-                package_dirs = self._unique_paths(
-                    [
-                        self.package_dir,
-                        self._docker_host_mapped_path(self.package_dir),
-                    ]
+        nodes = Nodes([])
+        summary = (
+            f"JM 图集 [{aid}]\n"
+            f"共 {len(files)} 张图片"
+            f"{f', 本次发送前 {len(images)} 张, 省略 {omitted} 张' if omitted else ''}\n"
+            f"来源目录: {base_dir}"
+        )
+        nodes.nodes.append(Node(uin=self_id, name="JM 漫画下载器", content=[Plain(summary)]))
+
+        for index, image_path in enumerate(images, 1):
+            nodes.nodes.append(
+                Node(
+                    uin=self_id,
+                    name=f"JM 图集 {index}/{len(images)}",
+                    content=[Image.fromFileSystem(str(image_path))],
                 )
-                expire_before = time.time() - 24 * 60 * 60
-                for package_dir in package_dirs:
-                    if not package_dir.exists():
-                        continue
-                    for p in package_dir.glob("jm_*.zip"):
-                        if p.is_file() and p.stat().st_mtime < expire_before:
-                            try:
-                                p.unlink()
-                            except OSError:
-                                pass
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[JM] 清理旧 zip 失败: {e}")
+            )
 
-        await asyncio.to_thread(_cleanup)
+        await self.context.send_message(umo, MessageChain(chain=[nodes]))
