@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -80,6 +79,8 @@ class JMPlugin(Star):
         self._option_lock = asyncio.Lock()
         self._logged_in: bool = False
         self._background_tasks: set[asyncio.Task] = set()
+        self.package_dir: Path = self.data_dir / "packages"
+        self.package_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_data_dir(self) -> Path:
         """解析插件数据目录. 优先读取 custom_data_dir 配置项."""
@@ -113,10 +114,14 @@ class JMPlugin(Star):
         if not hasattr(self, "data_dir"):
             self.data_dir = self._resolve_data_dir()
             self.data_dir.mkdir(parents=True, exist_ok=True)
+        if not hasattr(self, "package_dir"):
+            self.package_dir = self.data_dir / "packages"
+            self.package_dir.mkdir(parents=True, exist_ok=True)
 
     async def initialize(self) -> None:
         """AstrBot 在加载本插件后会调用一次."""
         self._ensure_runtime_attrs()
+        await self._cleanup_old_packages()
         try:
             await self._rebuild_option(initial=True)
         except Exception as e:  # noqa: BLE001
@@ -773,12 +778,11 @@ class JMPlugin(Star):
                             await self.context.send_message(umo, message_chain)
                         except Exception as e:  # noqa: BLE001
                             logger.error(f"[JM] 推送 zip 失败: {e}")
-                            await self._send_to(umo, f"❌ 推送文件失败: {e}")
-                        finally:
-                            try:
-                                os.remove(zip_path)
-                            except OSError:
-                                pass
+                            await self._send_to(
+                                umo,
+                                f"❌ 推送文件失败: {e}\n"
+                                f"zip 已保留在: {zip_path}",
+                            )
                     else:
                         await self._send_to(umo, f"📁 下载目录: {scanned_roots[0] if scanned_roots else fallback_root}")
                 else:
@@ -905,8 +909,8 @@ class JMPlugin(Star):
         """把下载的图片打包成 zip 返回临时路径, 失败返回 None."""
         def _make_zip() -> Optional[str]:
             try:
-                tmp = Path(tempfile.gettempdir())
-                zip_path = tmp / f"jm_{aid}_{int(time.time())}.zip"
+                self.package_dir.mkdir(parents=True, exist_ok=True)
+                zip_path = self.package_dir / f"jm_{aid}_{int(time.time())}.zip"
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                     for p in files:
                         if not p.exists():
@@ -924,3 +928,23 @@ class JMPlugin(Star):
                 return None
 
         return await asyncio.to_thread(_make_zip)
+
+    async def _cleanup_old_packages(self) -> None:
+        """清理旧 zip 包. 不在发送后立刻删除, 避免平台延迟读取时报 ENOENT."""
+        self._ensure_runtime_attrs()
+
+        def _cleanup() -> None:
+            try:
+                if not self.package_dir.exists():
+                    return
+                expire_before = time.time() - 24 * 60 * 60
+                for p in self.package_dir.glob("jm_*.zip"):
+                    if p.is_file() and p.stat().st_mtime < expire_before:
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[JM] 清理旧 zip 失败: {e}")
+
+        await asyncio.to_thread(_cleanup)
