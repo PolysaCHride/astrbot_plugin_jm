@@ -247,6 +247,47 @@ class JMPlugin(Star):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def _docker_host_mapped_path(self, path: Path) -> Optional[Path]:
+        """把 AstrBot Docker 容器内常见数据路径映射到宿主机默认路径."""
+        raw = str(path)
+        prefix = "/AstrBot/data"
+        if raw == prefix or raw.startswith(prefix + "/"):
+            return Path("/root/astrbot/data" + raw[len(prefix):])
+        return None
+
+    def _unique_paths(self, paths: Iterable[Optional[Path]]) -> list[Path]:
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in paths:
+            if path is None:
+                continue
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(path)
+        return unique
+
+    def _scan_roots(self, *roots: Optional[Path]) -> list[Path]:
+        """生成下载结果扫描候选目录, 兼容 Docker 宿主机/容器路径差异."""
+        candidates: list[Optional[Path]] = []
+        for root in roots:
+            candidates.append(root)
+            if root is not None:
+                candidates.append(self._docker_host_mapped_path(root))
+
+        candidates.append(self.data_dir)
+        candidates.append(self._docker_host_mapped_path(self.data_dir))
+        return self._unique_paths(candidates)
+
+    def _package_dir_for(self, base_dir: Path) -> Path:
+        """让 zip 包落在实际扫描到的目录旁边, 提高跨容器发送文件的可见性."""
+        base_dir = base_dir.resolve()
+        download_subdir = (self.config.get("download_subdir") or "downloads").strip() or "downloads"
+        if base_dir.name == download_subdir:
+            return base_dir.parent / "packages"
+        return base_dir / "packages"
+
     async def _ensure_option(self) -> jmcomic.JmOption:
         self._ensure_runtime_attrs()
         if self.option is None:
@@ -733,19 +774,17 @@ class JMPlugin(Star):
                             found.append(p)
                     return found
 
-                if primary_root is not None:
-                    downloaded = _scan(primary_root)
-                # 主路径找不到时, 退到插件计算的下載目录
-                if not downloaded:
-                    downloaded = _scan(fallback_root)
-                # 仍然找不到时, 退到 data_dir 全量扫 (容错卷挂载视角差异)
-                if not downloaded and self.data_dir.exists():
-                    downloaded = _scan(self.data_dir)
+                roots_to_try = self._scan_roots(primary_root, fallback_root)
+                for root in roots_to_try:
+                    downloaded = _scan(root)
+                    if downloaded:
+                        break
 
                 # 把扫描诊断信息打到日志, 方便后续调试
                 logger.info(
                     f"[JM] 下载完成扫描: primary={primary_root}, "
                     f"fallback={fallback_root}, data_dir={self.data_dir}, "
+                    f"roots={roots_to_try}, "
                     f"扫到 {len(downloaded)} 张图片"
                 )
 
@@ -786,8 +825,7 @@ class JMPlugin(Star):
                     else:
                         await self._send_to(umo, f"📁 下载目录: {scanned_roots[0] if scanned_roots else fallback_root}")
                 else:
-                    # 三处都找不到, 把所有尝试过的路径都告诉用户
-                    tried = ", ".join(str(p) for p in [primary_root, fallback_root, self.data_dir] if p)
+                    tried = ", ".join(str(p) for p in roots_to_try)
                     await self._send_to(umo, f"⚠️ 未发现本次下载的图片文件, 尝试过的目录: {tried}")
             except Exception as e:  # noqa: BLE001
                 logger.error(f"[JM] 下载任务异常: {e}", exc_info=True)
@@ -909,8 +947,9 @@ class JMPlugin(Star):
         """把下载的图片打包成 zip 返回临时路径, 失败返回 None."""
         def _make_zip() -> Optional[str]:
             try:
-                self.package_dir.mkdir(parents=True, exist_ok=True)
-                zip_path = self.package_dir / f"jm_{aid}_{int(time.time())}.zip"
+                package_dir = self._package_dir_for(base_dir)
+                package_dir.mkdir(parents=True, exist_ok=True)
+                zip_path = package_dir / f"jm_{aid}_{int(time.time())}.zip"
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                     for p in files:
                         if not p.exists():
@@ -935,15 +974,22 @@ class JMPlugin(Star):
 
         def _cleanup() -> None:
             try:
-                if not self.package_dir.exists():
-                    return
+                package_dirs = self._unique_paths(
+                    [
+                        self.package_dir,
+                        self._docker_host_mapped_path(self.package_dir),
+                    ]
+                )
                 expire_before = time.time() - 24 * 60 * 60
-                for p in self.package_dir.glob("jm_*.zip"):
-                    if p.is_file() and p.stat().st_mtime < expire_before:
-                        try:
-                            p.unlink()
-                        except OSError:
-                            pass
+                for package_dir in package_dirs:
+                    if not package_dir.exists():
+                        continue
+                    for p in package_dir.glob("jm_*.zip"):
+                        if p.is_file() and p.stat().st_mtime < expire_before:
+                            try:
+                                p.unlink()
+                            except OSError:
+                                pass
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"[JM] 清理旧 zip 失败: {e}")
 
