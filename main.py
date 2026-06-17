@@ -655,18 +655,56 @@ class JMPlugin(Star):
                 await self._run_blocking(_do_download)
                 elapsed = time.time() - t0
 
-                # 统计本次时间窗内新增的图片, 不依赖 dir_rule
-                root = self._resolve_download_dir()
+                # 1. 优先用 jmcomic option 的 dir_rule.base_dir 作为扫描根
+                #    (这是 jmcomic 实际写入的目录, 与 plugin_config 计算的路径可能因
+                #     容器卷挂载 / 软链接而出现差异)
+                primary_root: Optional[Path] = None
+                try:
+                    base_dir_attr = getattr(option.dir_rule, "base_dir", None)
+                    if base_dir_attr:
+                        primary_root = Path(str(base_dir_attr))
+                except Exception:  # noqa: BLE001
+                    primary_root = None
+
+                # 2. 兜底: 用插件自身计算的下载目录
+                fallback_root = self._resolve_download_dir()
+
+                # mtime 窗口放宽到 5 分钟, 防止因下载耗时长或 jmcomic 缓存命中
+                # (断点续传) 导致 mtime 早于 t0 而被过滤
                 img_suffixes = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+                mtime_window = t0 - 300  # 5 分钟
                 downloaded: list[Path] = []
-                if root.exists():
+                scanned_roots: list[Path] = []
+
+                def _scan(root: Path) -> list[Path]:
+                    found: list[Path] = []
+                    if not root or not root.exists():
+                        return found
+                    scanned_roots.append(root)
                     for p in root.rglob("*"):
                         if (
                             p.is_file()
                             and p.suffix.lower() in img_suffixes
-                            and p.stat().st_mtime >= t0 - 1
+                            and p.stat().st_mtime >= mtime_window
                         ):
-                            downloaded.append(p)
+                            found.append(p)
+                    return found
+
+                if primary_root is not None:
+                    downloaded = _scan(primary_root)
+                # 主路径找不到时, 退到插件计算的下載目录
+                if not downloaded:
+                    downloaded = _scan(fallback_root)
+                # 仍然找不到时, 退到 data_dir 全量扫 (容错卷挂载视角差异)
+                if not downloaded and self.data_dir.exists():
+                    downloaded = _scan(self.data_dir)
+
+                # 把扫描诊断信息打到日志, 方便后续调试
+                logger.info(
+                    f"[JM] 下载完成扫描: primary={primary_root}, "
+                    f"fallback={fallback_root}, data_dir={self.data_dir}, "
+                    f"扫到 {len(downloaded)} 张图片"
+                )
 
                 total_size = sum(p.stat().st_size for p in downloaded)
                 await self._send_to(
@@ -676,7 +714,9 @@ class JMPlugin(Star):
                 )
 
                 if downloaded:
-                    zip_path = await self._zip_to_send(downloaded, root, aid)
+                    # 用第一个有效扫描根作为 zip 内部相对路径基准
+                    base_for_zip = scanned_roots[0] if scanned_roots else fallback_root
+                    zip_path = await self._zip_to_send(downloaded, base_for_zip, aid)
                     if zip_path:
                         from astrbot.api.event import MessageChain
 
@@ -702,9 +742,11 @@ class JMPlugin(Star):
                             except OSError:
                                 pass
                     else:
-                        await self._send_to(umo, f"📁 下载目录: {root}")
+                        await self._send_to(umo, f"📁 下载目录: {scanned_roots[0] if scanned_roots else fallback_root}")
                 else:
-                    await self._send_to(umo, f"⚠️ 未发现本次下载的图片文件, 请检查目录: {root}")
+                    # 三处都找不到, 把所有尝试过的路径都告诉用户
+                    tried = ", ".join(str(p) for p in [primary_root, fallback_root, self.data_dir] if p)
+                    await self._send_to(umo, f"⚠️ 未发现本次下载的图片文件, 尝试过的目录: {tried}")
             except Exception as e:  # noqa: BLE001
                 logger.error(f"[JM] 下载任务异常: {e}", exc_info=True)
                 try:
