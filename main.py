@@ -678,12 +678,21 @@ class JMPlugin(Star):
                 if downloaded:
                     zip_path = await self._zip_to_send(downloaded, root, aid)
                     if zip_path:
-                        chain = [
-                            Comp.Plain(f"📦 已打包: {os.path.basename(zip_path)}"),
-                            Comp.File(file=str(zip_path), name=os.path.basename(zip_path)),
-                        ]
+                        from astrbot.api.event import MessageChain
+
+                        # 注意: context.send_message 期望 MessageChain 对象,
+                        #       不是原生 list. 通过 chain=[...] 包装一层
+                        message_chain = MessageChain(
+                            chain=[
+                                Comp.Plain(f"📦 已打包: {os.path.basename(zip_path)}"),
+                                Comp.File(
+                                    file=str(zip_path),
+                                    name=os.path.basename(zip_path),
+                                ),
+                            ]
+                        )
                         try:
-                            await self.context.send_message(umo, chain)
+                            await self.context.send_message(umo, message_chain)
                         except Exception as e:  # noqa: BLE001
                             logger.error(f"[JM] 推送 zip 失败: {e}")
                             await self._send_to(umo, f"❌ 推送文件失败: {e}")
