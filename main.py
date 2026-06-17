@@ -22,6 +22,19 @@ import jmcomic
 
 # 本子 / 章节 ID 都是纯数字字符串
 ID_PATTERN = re.compile(r"\d{4,}")
+IMAGE_SUFFIXES = {
+    ".jpg",
+    ".jpe",
+    ".jpeg",
+    ".jfif",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".avif",
+}
 
 
 def extract_id(text: str) -> Optional[str]:
@@ -241,13 +254,16 @@ class JMPlugin(Star):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _docker_host_mapped_path(self, path: Path) -> Optional[Path]:
+    def _docker_host_mapped_paths(self, path: Path) -> list[Path]:
         """把 AstrBot Docker 容器内常见数据路径映射到宿主机默认路径."""
         raw = str(path)
         prefix = "/AstrBot/data"
+        mapped: list[Path] = []
         if raw == prefix or raw.startswith(prefix + "/"):
-            return Path("/root/astrbot/data" + raw[len(prefix):])
-        return None
+            suffix = raw[len(prefix):]
+            mapped.append(Path("/root/astrbot/data" + suffix))
+            mapped.append(Path("/root/AstrBot/astrbot/data" + suffix))
+        return mapped
 
     def _unique_paths(self, paths: Iterable[Optional[Path]]) -> list[Path]:
         unique: list[Path] = []
@@ -268,10 +284,10 @@ class JMPlugin(Star):
         for root in roots:
             candidates.append(root)
             if root is not None:
-                candidates.append(self._docker_host_mapped_path(root))
+                candidates.extend(self._docker_host_mapped_paths(root))
 
         candidates.append(self.data_dir)
-        candidates.append(self._docker_host_mapped_path(self.data_dir))
+        candidates.extend(self._docker_host_mapped_paths(self.data_dir))
         return self._unique_paths(candidates)
 
     async def _ensure_option(self) -> jmcomic.JmOption:
@@ -740,30 +756,54 @@ class JMPlugin(Star):
                 # 2. 兜底: 用插件自身计算的下载目录
                 fallback_root = self._resolve_download_dir()
 
-                # mtime 窗口放宽到 5 分钟, 防止因下载耗时长或 jmcomic 缓存命中
-                # (断点续传) 导致 mtime 早于 t0 而被过滤
-                img_suffixes = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+                # 第一轮优先找本次新增/修改的图片; 若 jmcomic 命中缓存,
+                # 文件 mtime 可能早于本次任务, 第二轮会回退到目录内全部图片.
                 mtime_window = t0 - 300  # 5 分钟
                 downloaded: list[Path] = []
-                scanned_roots: list[Path] = []
+                matched_root: Path = fallback_root
 
-                def _scan(root: Path) -> list[Path]:
+                target_hints = [
+                    str(getattr(target_album, "title", "") or ""),
+                    *[
+                        str(getattr(ph, "title", "") or "")
+                        for ph in target_photos
+                    ],
+                ]
+                target_hints = [hint for hint in target_hints if hint]
+
+                def _is_image(path: Path) -> bool:
+                    return path.suffix.lower() in IMAGE_SUFFIXES
+
+                def _filter_by_target_hints(paths: list[Path]) -> list[Path]:
+                    if not target_hints:
+                        return paths
+                    filtered = [
+                        p for p in paths
+                        if any(hint in str(p) for hint in target_hints)
+                    ]
+                    return filtered or paths
+
+                def _scan(root: Path, recent_only: bool) -> list[Path]:
                     found: list[Path] = []
                     if not root or not root.exists():
                         return found
-                    scanned_roots.append(root)
                     for p in root.rglob("*"):
-                        if (
-                            p.is_file()
-                            and p.suffix.lower() in img_suffixes
-                            and p.stat().st_mtime >= mtime_window
-                        ):
-                            found.append(p)
-                    return found
+                        if not p.is_file() or not _is_image(p):
+                            continue
+                        if recent_only and p.stat().st_mtime < mtime_window:
+                            continue
+                        found.append(p)
+                    return _filter_by_target_hints(found)
 
                 roots_to_try = self._scan_roots(primary_root, fallback_root)
-                for root in roots_to_try:
-                    downloaded = _scan(root)
+                scan_mode = "recent"
+                for recent_only in (True, False):
+                    for root in roots_to_try:
+                        downloaded = _scan(root, recent_only)
+                        if downloaded:
+                            matched_root = root
+                            scan_mode = "recent" if recent_only else "cached"
+                            break
                     if downloaded:
                         break
 
@@ -771,7 +811,7 @@ class JMPlugin(Star):
                 logger.info(
                     f"[JM] 下载完成扫描: primary={primary_root}, "
                     f"fallback={fallback_root}, data_dir={self.data_dir}, "
-                    f"roots={roots_to_try}, "
+                    f"roots={roots_to_try}, matched={matched_root}, mode={scan_mode}, "
                     f"扫到 {len(downloaded)} 张图片"
                 )
 
@@ -783,7 +823,7 @@ class JMPlugin(Star):
                 )
 
                 if downloaded:
-                    base_for_forward = scanned_roots[0] if scanned_roots else fallback_root
+                    base_for_forward = matched_root
                     try:
                         await self._send_images_as_forward(
                             umo,
