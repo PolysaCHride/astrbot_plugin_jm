@@ -340,8 +340,8 @@ class JMPlugin(Star):
     # /jm search <关键词>
     # ------------------------------------------------------------------ #
     @jm_group.command("search", alias={"搜索", "s"})
-    async def jm_search(self, event: AstrMessageEvent, *args: str):
-        keyword = " ".join(a for a in args if a).strip()
+    async def jm_search(self, event: AstrMessageEvent, args: str = ""):
+        keyword = (args or "").strip()
         if not keyword:
             yield self._send_text(event, "用法: /jm search <关键词>")
             event.stop_event()
@@ -379,8 +379,8 @@ class JMPlugin(Star):
     # /jm info <本子ID>
     # ------------------------------------------------------------------ #
     @jm_group.command("info", alias={"详情", "i"})
-    async def jm_info(self, event: AstrMessageEvent, *args: str):
-        aid = extract_id(" ".join(args))
+    async def jm_info(self, event: AstrMessageEvent, args: str = ""):
+        aid = extract_id(args)
         if not aid:
             yield self._send_text(event, "用法: /jm info <本子ID>")
             event.stop_event()
@@ -436,8 +436,8 @@ class JMPlugin(Star):
     # /jm cover <本子ID>
     # ------------------------------------------------------------------ #
     @jm_group.command("cover", alias={"封面", "c"})
-    async def jm_cover(self, event: AstrMessageEvent, *args: str):
-        aid = extract_id(" ".join(args))
+    async def jm_cover(self, event: AstrMessageEvent, args: str = ""):
+        aid = extract_id(args)
         if not aid:
             yield self._send_text(event, "用法: /jm cover <本子ID>")
             event.stop_event()
@@ -468,8 +468,8 @@ class JMPlugin(Star):
     # /jm episodes <本子ID>
     # ------------------------------------------------------------------ #
     @jm_group.command("episodes", alias={"章节", "e"})
-    async def jm_episodes(self, event: AstrMessageEvent, *args: str):
-        aid = extract_id(" ".join(args))
+    async def jm_episodes(self, event: AstrMessageEvent, args: str = ""):
+        aid = extract_id(args)
         if not aid:
             yield self._send_text(event, "用法: /jm episodes <本子ID>")
             event.stop_event()
@@ -515,8 +515,8 @@ class JMPlugin(Star):
     # /jm photo <章节ID>
     # ------------------------------------------------------------------ #
     @jm_group.command("photo", alias={"章节详情", "p"})
-    async def jm_photo(self, event: AstrMessageEvent, *args: str):
-        pid = extract_id(" ".join(args))
+    async def jm_photo(self, event: AstrMessageEvent, args: str = ""):
+        pid = extract_id(args)
         if not pid:
             yield self._send_text(event, "用法: /jm photo <章节ID>")
             event.stop_event()
@@ -558,8 +558,8 @@ class JMPlugin(Star):
     # /jm download <ID> [选择器] (异步任务, 完成后主动推送)
     # ------------------------------------------------------------------ #
     @jm_group.command("download", alias={"下载", "d"})
-    async def jm_download(self, event: AstrMessageEvent, *args: str):
-        joined = " ".join(args).strip()
+    async def jm_download(self, event: AstrMessageEvent, args: str = ""):
+        joined = (args or "").strip()
         aid = extract_id(joined)
         if not aid:
             yield self._send_text(
@@ -685,8 +685,9 @@ class JMPlugin(Star):
     # /jm ranking [day|week|month]
     # ------------------------------------------------------------------ #
     @jm_group.command("ranking", alias={"排行榜", "r"})
-    async def jm_ranking(self, event: AstrMessageEvent, *args: str):
-        rtype = (args[0] if args else "week").strip().lower()
+    async def jm_ranking(self, event: AstrMessageEvent, args: str = ""):
+        rtype = (args or "").strip().split()[0] if (args or "").strip() else "week"
+        rtype = rtype.lower()
         if rtype not in ("day", "week", "month"):
             rtype = "week"
 
@@ -729,16 +730,17 @@ class JMPlugin(Star):
     # /jm tags <标签> [页码]
     # ------------------------------------------------------------------ #
     @jm_group.command("tags", alias={"标签", "t"})
-    async def jm_tags(self, event: AstrMessageEvent, *args: str):
-        if not args:
+    async def jm_tags(self, event: AstrMessageEvent, args: str = ""):
+        parts = (args or "").strip().split()
+        if not parts:
             yield self._send_text(event, "用法: /jm tags <标签> [页码]")
             event.stop_event()
             return
-        tag = args[0]
+        tag = parts[0]
         page_num = 1
-        if len(args) > 1:
+        if len(parts) > 1:
             try:
-                page_num = max(1, int(args[1]))
+                page_num = max(1, int(parts[1]))
             except ValueError:
                 page_num = 1
 
