@@ -64,19 +64,32 @@ class JMPlugin(Star):
         self.context = context
         self.config = config
 
-        # 数据目录 (绝对路径, 由 StarTools 自动创建)
-        # 注: Context.get_data_dir() 不存在, 应使用 StarTools.get_data_dir()
-        #     (PR #1194 引入的标准化接口)
+        # 数据目录解析优先级:
+        #   1. 配置项 custom_data_dir (用户显式覆盖)
+        #   2. StarTools.get_data_dir() (AstrBot 标准接口)
+        #   3. get_astrbot_data_path() + self.name (老版本兜底)
+        # 注: 当部署环境导致 2/3 返回的路径与实际不一致时
+        #     (例如容器 /AstrBot/data/... 与宿主 /root/astrbot/data/...),
+        #     通过配置项 1 直接指定真实路径即可.
+        self.data_dir: Path = self._resolve_data_dir()
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[JM] 数据目录: {self.data_dir}")
+
+    def _resolve_data_dir(self) -> Path:
+        """解析插件数据目录. 优先读取 custom_data_dir 配置项."""
+        cfg = self.config
+        custom = (cfg.get("custom_data_dir") or "").strip() if cfg else ""
+        if custom:
+            return Path(custom).expanduser().resolve()
+
         try:
             try:
-                self.data_dir: Path = Path(StarTools.get_data_dir(self.name))
+                return Path(StarTools.get_data_dir(self.name))
             except TypeError:
-                self.data_dir = Path(StarTools.get_data_dir())
+                return Path(StarTools.get_data_dir())
         except Exception:  # noqa: BLE001
-            # 兜底: 拼接标准路径 (兼容无 StarTools.get_data_dir 的旧版本)
             from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-            self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / self.name
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+            return Path(get_astrbot_data_path()) / "plugin_data" / self.name
 
         # 启动时构建 jmcomic option
         self.option: Optional[jmcomic.JmOption] = None
@@ -334,11 +347,16 @@ class JMPlugin(Star):
     @jm_group.command("status", alias={"状态", "配置"})
     async def jm_status(self, event: AstrMessageEvent):
         cfg = self.config
+        custom_dir = (cfg.get("custom_data_dir") or "").strip()
+        data_dir_label = (
+            f"{self.data_dir} (自定义覆盖)" if custom_dir else f"{self.data_dir} (默认)"
+        )
         msg = (
             "⚙️ JM 插件配置\n"
             f"  客户端实现: {cfg.get('client_impl')}\n"
             f"  自定义域名: {cfg.get('custom_domain') or '未设置 (使用内置)'}\n"
             f"  代理: {'启用 ' + (cfg.get('proxy') or '系统代理') if cfg.get('use_proxy') else '关闭'}\n"
+            f"  数据目录: {data_dir_label}\n"
             f"  下载目录: {self._resolve_download_dir()}\n"
             f"  图片并发: {cfg.get('image_thread_count')}, 章节并发: {cfg.get('photo_thread_count')}\n"
             f"  图片后缀: {cfg.get('image_suffix') or '原格式'}\n"

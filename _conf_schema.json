@@ -5,6 +5,11 @@
     "default": "api",
     "options": ["html", "api"]
   },
+  "custom_data_dir": {
+    "description": "自定义数据目录 (高级). 留空时使用 AstrBot 默认的 plugin_data 目录. 当默认路径找不到下载文件时 (例如 /AstrBot/data/... 与实际部署路径不一致), 在此填写真实的数据目录绝对路径, 例如 /root/astrbot/data/plugin_data/astrbot_plugin_jm",
+    "type": "string",
+    "default": ""
+  },
   "custom_domain": {
     "description": "自定义域名 (可选, 填入后优先于内置域名)。例如: 18comic.vip",
     "type": "string",
