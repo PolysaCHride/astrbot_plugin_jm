@@ -9,7 +9,6 @@
 MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 
 本仓库源码采用 MIT 协议发布. 请注意:
-- 协议仅约束**本仓库的代码**
 - 本插件依赖 [JMComic-Crawler-Python](https://github.com/hect0x7/JMComic-Crawler-Python), 其许可与使用条款请参考其仓库
 - 任何因使用本插件产生的法律 / 版权问题由使用者自行承担
 
