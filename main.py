@@ -16,6 +16,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.config import AstrBotConfig
+from astrbot.core.star.star_tools import StarTools
 
 import jmcomic
 
@@ -62,8 +63,15 @@ class JMPlugin(Star):
         self.context = context
         self.config = config
 
-        # 数据目录 (绝对路径)
-        self.data_dir: Path = Path(context.get_data_dir()).resolve()
+        # 数据目录 (绝对路径, 由 StarTools 自动创建)
+        # 注: v4.22.2 中 Context.get_data_dir() 不存在, 应使用 StarTools.get_data_dir()
+        #     (PR #1194 引入的标准化接口)
+        try:
+            self.data_dir: Path = Path(StarTools.get_data_dir())
+        except Exception:  # noqa: BLE001
+            # 兜底: 拼接标准路径 (兼容无 StarTools.get_data_dir 的旧版本)
+            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+            self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / self.name
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # 启动时构建 jmcomic option
