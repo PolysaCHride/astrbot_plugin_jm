@@ -1050,7 +1050,7 @@ class JMPlugin(Star):
                 f"({batch_count} 批), 避免构造嵌套合并转发导致发送慢或显示异常."
             )
 
-        def _build_batch(batch: list[Path], idx: int) -> Nodes:
+        def _build_batch(batch: list[Path], idx: int, first_page: int) -> Nodes:
             nodes = Nodes([])
             nodes.nodes.append(
                 Node(
@@ -1066,10 +1066,11 @@ class JMPlugin(Star):
                 )
             )
             for n, image_path in enumerate(batch, 1):
+                page_number = first_page + n - 1
                 nodes.nodes.append(
                     Node(
                         uin=self_id,
-                        name=f"JM 图集 {idx}-{n}",
+                        name=f"{page_number}/{total}",
                         content=[Image.fromFileSystem(str(image_path))],
                     )
                 )
@@ -1079,6 +1080,6 @@ class JMPlugin(Star):
             batch = images[start : start + batch_size]
             await self.context.send_message(
                 umo,
-                MessageChain(chain=[_build_batch(batch, idx)]),
+                MessageChain(chain=[_build_batch(batch, idx, start + 1)]),
             )
             await asyncio.sleep(0)
