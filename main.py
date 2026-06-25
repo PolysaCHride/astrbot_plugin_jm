@@ -346,6 +346,7 @@ class JMPlugin(Star):
             "/jm episodes <本子ID>          - 列出本子的全部章节\n"
             "/jm photo <章节ID>             - 查看章节信息\n"
             "/jm download <ID> [选择器]     - 下载本子/章节 (异步)\n"
+            "   长本子会分批发送多条合并聊天记录\n"
             "   选择器示例:\n"
             "     all / 全部                 - 全部章节\n"
             "     1,3,5                      - 指定章节序号\n"
@@ -426,6 +427,9 @@ class JMPlugin(Star):
             f"  数据目录: {data_dir_label}\n"
             f"  下载目录: {self._resolve_download_dir()}\n"
             f"  图片并发: {cfg.get('image_thread_count')}, 章节并发: {cfg.get('photo_thread_count')}\n"
+            f"  每批合并转发上限: {cfg.get('max_forward_images')} 张, "
+            f"整本图片上限: {cfg.get('max_album_images') or '不限'}\n"
+            f"  嵌套合并转发: {'开(实验,不推荐)' if cfg.get('nested_forward') else '关'}\n"
             f"  图片后缀: {cfg.get('image_suffix') or '原格式'}\n"
             f"  登录: {'是' if cfg.get('enable_login') and cfg.get('username') else '否'}\n"
             f"  已登录: {'是' if self._logged_in else '否'}\n"
@@ -732,8 +736,50 @@ class JMPlugin(Star):
                     target_photos = [photo]
                     is_album = False
 
+                # 下载前预查总图片数, 超过 max_album_images 直接拒绝, 避免误下长篇
+                # (预查的网络请求不计入下方 t0 的下载耗时)
+                max_album_images = int(self.config.get("max_album_images", 0) or 0)
+                if max_album_images > 0:
+                    try:
+                        est_total = 0
+                        for ph in target_photos:
+                            # 优先用章节对象自身的图片数属性; 不确定时回退到迭代计数;
+                            # 都拿不到时再请求详情 (额外网络开销, 仅兜底)
+                            cnt = getattr(ph, "page_count", None)
+                            if not cnt:
+                                try:
+                                    cnt = len(list(ph))
+                                except Exception:  # noqa: BLE001
+                                    det = await self._run_blocking(
+                                        client.get_photo_detail, ph.photo_id, False
+                                    )
+                                    cnt = len(list(det)) if det else 0
+                            est_total += int(cnt or 0)
+                        if est_total > max_album_images:
+                            await self._send_to(
+                                umo,
+                                f"❌ 本子 {aid} 共约 {est_total} 张图片, "
+                                f"超过上限 {max_album_images} 张, 已取消下载。\n"
+                                f"如需下载请在插件配置中调大 max_album_images, "
+                                f"或用 /jm download <ID> <章节选择器> 分章节下载。",
+                            )
+                            return
+                        await self._send_to(
+                            umo,
+                            f"⏳ 正在下载 {len(target_photos)} 个章节 (约 {est_total} 张) ...",
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        # 预查失败不阻断主流程, 退回只提示章节数
+                        logger.warning(f"[JM] 预查图片数失败, 跳过上限检查: {e}")
+                        await self._send_to(
+                            umo, f"⏳ 正在下载 {len(target_photos)} 个章节 ..."
+                        )
+                else:
+                    await self._send_to(
+                        umo, f"⏳ 正在下载 {len(target_photos)} 个章节 ..."
+                    )
+
                 t0 = time.time()
-                await self._send_to(umo, f"⏳ 正在下载 {len(target_photos)} 个章节 ...")
 
                 def _do_download():
                     for ph in target_photos:
@@ -975,35 +1021,78 @@ class JMPlugin(Star):
         aid: str,
         base_dir: Path,
     ) -> None:
-        """参考 astrbot_plugin_parser 的 Node/Nodes 方式发送合并转发图集."""
+        """分批发送合并转发图集.
+
+        超过单批上限 (max_forward_images) 时自动拆成多条合并聊天记录,
+        放进同一条 MessageChain 由适配器逐条发送, 不再截断丢弃图片.
+        若开启 nested_forward, 则尝试把各批 Nodes 嵌套进一个外层 Node
+        (实验性, QQ 协议端对「转发中的转发」渲染不可靠).
+
+        参考 astrbot_plugin_parser 的 Node/Nodes 用法.
+        """
         from astrbot.api.event import MessageChain
 
         images = sorted(
             [p for p in files if p.exists() and p.is_file()],
             key=self._path_sort_key,
         )
-        max_images = int(self.config.get("max_forward_images", 200) or 0)
-        omitted = 0
-        if max_images > 0 and len(images) > max_images:
-            omitted = len(images) - max_images
-            images = images[:max_images]
+        if not images:
+            return
 
-        nodes = Nodes([])
-        summary = (
-            f"JM 图集 [{aid}]\n"
-            f"共 {len(files)} 张图片"
-            f"{f', 本次发送前 {len(images)} 张, 省略 {omitted} 张' if omitted else ''}\n"
-            f"来源目录: {base_dir}"
-        )
-        nodes.nodes.append(Node(uin=self_id, name="JM 漫画下载器", content=[Plain(summary)]))
+        # 每批大小: max_forward_images 是「每条合并转发」的图片上限
+        # 0 = 不限制, 全部塞进单批 (用户显式选择, 自担平台消息过大被拒绝的风险)
+        raw_max = int(self.config.get("max_forward_images", 200) or 0)
+        batch_size = len(images) if raw_max == 0 else max(1, raw_max)
 
-        for index, image_path in enumerate(images, 1):
+        chunks = [
+            images[i : i + batch_size] for i in range(0, len(images), batch_size)
+        ]
+
+        total = len(images)
+        nested = bool(self.config.get("nested_forward", False))
+
+        def _build_batch(batch: list[Path], idx: int) -> Nodes:
+            nodes = Nodes([])
             nodes.nodes.append(
                 Node(
                     uin=self_id,
-                    name=f"JM 图集 {index}/{len(images)}",
-                    content=[Image.fromFileSystem(str(image_path))],
+                    name="JM 漫画下载器",
+                    content=[
+                        Plain(
+                            f"JM 图集 [{aid}]\n"
+                            f"第 {idx}/{len(chunks)} 批, 共 {total} 张, "
+                            f"本批 {len(batch)} 张\n来源目录: {base_dir}"
+                        )
+                    ],
                 )
             )
+            for n, image_path in enumerate(batch, 1):
+                nodes.nodes.append(
+                    Node(
+                        uin=self_id,
+                        name=f"JM 图集 {idx}-{n}",
+                        content=[Image.fromFileSystem(str(image_path))],
+                    )
+                )
+            return nodes
 
-        await self.context.send_message(umo, MessageChain(chain=[nodes]))
+        batch_nodes = [_build_batch(batch, idx) for idx, batch in enumerate(chunks, 1)]
+
+        if nested and len(batch_nodes) > 1:
+            # 实验: 把各批 Nodes 嵌套进一个外层 Node.
+            # Node.to_dict 对 Node|Nodes 递归 (components.py:690), 序列化层可行;
+            # 但 Nodes.to_dict 产出非标准 {messages:[...]}, QQ 协议端大概率渲染异常.
+            outer = Node(
+                uin=self_id,
+                name=f"JM 图集 [{aid}] 共 {total} 张 ({len(chunks)} 批)",
+                content=batch_nodes,
+            )
+            chain = [outer]
+            logger.warning(
+                f"[JM] nested_forward 已开启, 本子 {aid} 尝试嵌套合并转发 "
+                f"({len(chunks)} 批). 若 QQ 端显示异常请关闭 nested_forward."
+            )
+        else:
+            chain = batch_nodes
+
+        await self.context.send_message(umo, MessageChain(chain=chain))
