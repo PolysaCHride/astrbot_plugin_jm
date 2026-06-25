@@ -429,7 +429,7 @@ class JMPlugin(Star):
             f"  图片并发: {cfg.get('image_thread_count')}, 章节并发: {cfg.get('photo_thread_count')}\n"
             f"  每批合并转发上限: {cfg.get('max_forward_images')} 张, "
             f"整本图片上限: {cfg.get('max_album_images') or '不限'}\n"
-            f"  嵌套合并转发: {'开(实验,不推荐)' if cfg.get('nested_forward') else '关'}\n"
+            f"  嵌套合并转发: {'开(已停用, QQ 分批发送)' if cfg.get('nested_forward') else '关'}\n"
             f"  图片后缀: {cfg.get('image_suffix') or '原格式'}\n"
             f"  登录: {'是' if cfg.get('enable_login') and cfg.get('username') else '否'}\n"
             f"  已登录: {'是' if self._logged_in else '否'}\n"
@@ -1024,16 +1024,14 @@ class JMPlugin(Star):
         """分批发送合并转发图集.
 
         超过单批上限 (max_forward_images) 时自动拆成多条合并聊天记录,
-        放进同一条 MessageChain 由适配器逐条发送, 不再截断丢弃图片.
-        若开启 nested_forward, 则尝试把各批 Nodes 嵌套进一个外层 Node
-        (实验性, QQ 协议端对「转发中的转发」渲染不可靠).
+        每批即时构造并发送, 避免长本子一次性创建大量 Node/Nodes 对象.
 
         参考 astrbot_plugin_parser 的 Node/Nodes 用法.
         """
         from astrbot.api.event import MessageChain
 
         images = sorted(
-            [p for p in files if p.exists() and p.is_file()],
+            [p for p in files if p.is_file()],
             key=self._path_sort_key,
         )
         if not images:
@@ -1043,13 +1041,14 @@ class JMPlugin(Star):
         # 0 = 不限制, 全部塞进单批 (用户显式选择, 自担平台消息过大被拒绝的风险)
         raw_max = int(self.config.get("max_forward_images", 200) or 0)
         batch_size = len(images) if raw_max == 0 else max(1, raw_max)
-
-        chunks = [
-            images[i : i + batch_size] for i in range(0, len(images), batch_size)
-        ]
-
         total = len(images)
-        nested = bool(self.config.get("nested_forward", False))
+        batch_count = (total + batch_size - 1) // batch_size
+
+        if self.config.get("nested_forward", False) and batch_count > 1:
+            logger.warning(
+                f"[JM] nested_forward 已停用: 本子 {aid} 将按 QQ 分批合并转发 "
+                f"({batch_count} 批), 避免构造嵌套合并转发导致发送慢或显示异常."
+            )
 
         def _build_batch(batch: list[Path], idx: int) -> Nodes:
             nodes = Nodes([])
@@ -1060,7 +1059,7 @@ class JMPlugin(Star):
                     content=[
                         Plain(
                             f"JM 图集 [{aid}]\n"
-                            f"第 {idx}/{len(chunks)} 批, 共 {total} 张, "
+                            f"第 {idx}/{batch_count} 批, 共 {total} 张, "
                             f"本批 {len(batch)} 张\n来源目录: {base_dir}"
                         )
                     ],
@@ -1076,23 +1075,10 @@ class JMPlugin(Star):
                 )
             return nodes
 
-        batch_nodes = [_build_batch(batch, idx) for idx, batch in enumerate(chunks, 1)]
-
-        if nested and len(batch_nodes) > 1:
-            # 实验: 把各批 Nodes 嵌套进一个外层 Node.
-            # Node.to_dict 对 Node|Nodes 递归 (components.py:690), 序列化层可行;
-            # 但 Nodes.to_dict 产出非标准 {messages:[...]}, QQ 协议端大概率渲染异常.
-            outer = Node(
-                uin=self_id,
-                name=f"JM 图集 [{aid}] 共 {total} 张 ({len(chunks)} 批)",
-                content=batch_nodes,
+        for idx, start in enumerate(range(0, total, batch_size), 1):
+            batch = images[start : start + batch_size]
+            await self.context.send_message(
+                umo,
+                MessageChain(chain=[_build_batch(batch, idx)]),
             )
-            chain = [outer]
-            logger.warning(
-                f"[JM] nested_forward 已开启, 本子 {aid} 尝试嵌套合并转发 "
-                f"({len(chunks)} 批). 若 QQ 端显示异常请关闭 nested_forward."
-            )
-        else:
-            chain = batch_nodes
-
-        await self.context.send_message(umo, MessageChain(chain=chain))
+            await asyncio.sleep(0)
