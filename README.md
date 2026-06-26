@@ -74,7 +74,7 @@ MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 | `download_subdir`    | `downloads`            | 数据目录下的下载子目录名                                         |
 | `dir_rule`           | `Bd / Atitle / Ptitle` | 下载目录命名规则 (jmcomic DSL)                                   |
 | `max_search_results` | `10`                   | 搜索结果最大显示条数                                             |
-| `max_forward_images` | `200`                  | 合并聊天记录单次最多发送图片数, `0` 表示不限制                   |
+| `max_forward_images` | `30`                   | 合并聊天记录单次最多发送图片数, `0` 表示不限制。建议范围 20-50, 过大易导致 WebSocket API 调用超时 |
 | `nested_forward`     | `false`                | 兼容旧配置, 已停用; QQ 平台始终按批发送多条独立合并聊天记录      |
 | `auto_send_cover`    | `true`                 | 查询本子详情时是否自动发送封面图                                 |
 | `enable_login`       | `false`                | 是否登录                                                         |
