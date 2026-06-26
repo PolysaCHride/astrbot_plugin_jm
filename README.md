@@ -9,6 +9,7 @@
 MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 
 本仓库源码采用 MIT 协议发布. 请注意:
+
 - 本插件依赖 [JMComic-Crawler-Python](https://github.com/hect0x7/JMComic-Crawler-Python), 其许可与使用条款请参考其仓库
 - 任何因使用本插件产生的法律 / 版权问题由使用者自行承担
 
@@ -26,64 +27,59 @@ MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 
 ## 安装
 
-将整个目录放入 `AstrBot/data/plugins/astrbot_plugin_jm/`, 然后在 WebUI 插件管理中重载即可.
-
-依赖:
-
-```
-pip install jmcomic PyYAML
-```
+1. 在Astrbot控制台中选择Astrbot插件→右下角加号→从文件安装，选择本插件进行安装，依赖会自动安装;或下载源代码zip，手动将本插件目录放到 AstrBot 的插件目录，在插件目录执行 `pip install jmcomic PyYAML`安装依赖。
+2. 在 AstrBot WebUI 中启用/重载插件。
 
 ## 命令一览
 
 所有命令以 `/jm` 开头 (子命令部分支持中文 / 简写别名).
 
-| 命令 | 说明 |
-| --- | --- |
-| `/jm help` | 显示帮助 |
-| `/jm status` | 查看当前配置 |
-| `/jm reload` | 重新加载配置 (管理员) |
-| `/jm search <关键词>` | 搜索本子 |
-| `/jm info <本子ID>` | 查看本子详情 (附封面) |
-| `/jm cover <本子ID>` | 仅获取本子封面 |
-| `/jm episodes <本子ID>` | 列出本子的全部章节 |
-| `/jm photo <章节ID>` | 查看章节信息 |
-| `/jm download <ID> [选择器]` | 下载本子/章节 (异步) |
-| `/jm ranking [day\|week\|month]` | 排行榜 |
-| `/jm tags <标签> [页码]` | 按标签查询 |
+| 命令                             | 说明                  |
+| -------------------------------- | --------------------- |
+| `/jm help`                       | 显示帮助              |
+| `/jm status`                     | 查看当前配置          |
+| `/jm reload`                     | 重新加载配置 (管理员) |
+| `/jm search <关键词>`            | 搜索本子              |
+| `/jm info <本子ID>`              | 查看本子详情 (附封面) |
+| `/jm cover <本子ID>`             | 仅获取本子封面        |
+| `/jm episodes <本子ID>`          | 列出本子的全部章节    |
+| `/jm photo <章节ID>`             | 查看章节信息          |
+| `/jm download <ID> [选择器]`     | 下载本子/章节 (异步)  |
+| `/jm ranking [day\|week\|month]` | 排行榜                |
+| `/jm tags <标签> [页码]`         | 按标签查询            |
 
 ### 章节选择器 (download)
 
-| 写法 | 含义 |
-| --- | --- |
-| `all` / `全部` | 全部章节 |
-| `1,3,5` | 指定章节序号 |
-| `1-10` | 范围 |
-| `1,3,5-10,15` | 混合格式 |
+| 写法           | 含义         |
+| -------------- | ------------ |
+| `all` / `全部` | 全部章节     |
+| `1,3,5`        | 指定章节序号 |
+| `1-10`         | 范围         |
+| `1,3,5-10,15`  | 混合格式     |
 
 例: `/jm download 350234 1-5` 下载 ID 350234 的前 5 章.
 
 ## 配置项 (在 WebUI 插件管理中编辑)
 
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `client_impl` | `api` | 客户端实现: `html` (网页端, 效率高) / `api` (APP 端, 兼容性更好) |
-| `custom_domain` | 空 | 自定义域名, 多个用英文逗号分隔 |
-| `use_proxy` | `false` | 是否启用代理 |
-| `proxy` | 空 | 代理地址, 例: `http://127.0.0.1:7890` |
-| `retry_times` | `3` | 网络请求重试次数 |
-| `image_thread_count` | `16` | 同时下载图片数 (网页端建议 ≤ 50) |
-| `photo_thread_count` | `4` | 同时下载章节数 |
-| `image_suffix` | `.jpg` | 图片保存后缀, 留空保持原格式 |
-| `download_subdir` | `downloads` | 数据目录下的下载子目录名 |
-| `dir_rule` | `Bd / Atitle / Ptitle` | 下载目录命名规则 (jmcomic DSL) |
-| `max_search_results` | `10` | 搜索结果最大显示条数 |
-| `max_forward_images` | `200` | 合并聊天记录单次最多发送图片数, `0` 表示不限制 |
-| `nested_forward` | `false` | 兼容旧配置, 已停用; QQ 平台始终按批发送多条独立合并聊天记录 |
-| `auto_send_cover` | `true` | 查询本子详情时是否自动发送封面图 |
-| `enable_login` | `false` | 是否登录 |
-| `username` | 空 | jmcomic 登录账号 (邮箱) |
-| `password` | 空 | jmcomic 登录密码 |
+| 字段                 | 默认值                 | 说明                                                             |
+| -------------------- | ---------------------- | ---------------------------------------------------------------- |
+| `client_impl`        | `api`                  | 客户端实现: `html` (网页端, 效率高) / `api` (APP 端, 兼容性更好) |
+| `custom_domain`      | 空                     | 自定义域名, 多个用英文逗号分隔                                   |
+| `use_proxy`          | `false`                | 是否启用代理                                                     |
+| `proxy`              | 空                     | 代理地址, 例: `http://127.0.0.1:7890`                            |
+| `retry_times`        | `3`                    | 网络请求重试次数                                                 |
+| `image_thread_count` | `16`                   | 同时下载图片数 (网页端建议 ≤ 50)                                 |
+| `photo_thread_count` | `4`                    | 同时下载章节数                                                   |
+| `image_suffix`       | `.jpg`                 | 图片保存后缀, 留空保持原格式                                     |
+| `download_subdir`    | `downloads`            | 数据目录下的下载子目录名                                         |
+| `dir_rule`           | `Bd / Atitle / Ptitle` | 下载目录命名规则 (jmcomic DSL)                                   |
+| `max_search_results` | `10`                   | 搜索结果最大显示条数                                             |
+| `max_forward_images` | `200`                  | 合并聊天记录单次最多发送图片数, `0` 表示不限制                   |
+| `nested_forward`     | `false`                | 兼容旧配置, 已停用; QQ 平台始终按批发送多条独立合并聊天记录      |
+| `auto_send_cover`    | `true`                 | 查询本子详情时是否自动发送封面图                                 |
+| `enable_login`       | `false`                | 是否登录                                                         |
+| `username`           | 空                     | jmcomic 登录账号 (邮箱)                                          |
+| `password`           | 空                     | jmcomic 登录密码                                                 |
 
 ## 目录结构
 
