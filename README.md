@@ -44,11 +44,11 @@ MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 | `/jm cover <本子ID>`             | 仅获取本子封面        |
 | `/jm episodes <本子ID>`          | 列出本子的全部章节    |
 | `/jm photo <章节ID>`             | 查看章节信息          |
-| `/jm download <ID> [选择器]`     | 下载本子/章节 (异步)  |
+| `/jm d <ID> [选择器]`            | 下载本子/章节 (异步)  |
 | `/jm ranking [day\|week\|month]` | 排行榜                |
 | `/jm tags <标签> [页码]`         | 按标签查询            |
 
-### 章节选择器 (download)
+### 章节选择器 (d)
 
 | 写法           | 含义         |
 | -------------- | ------------ |
@@ -57,7 +57,7 @@ MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 | `1-10`         | 范围         |
 | `1,3,5-10,15`  | 混合格式     |
 
-例: `/jm download 350234 1-5` 下载 ID 350234 的前 5 章.
+例: `/jm d 350234 1-5` 下载 ID 350234 的前 5 章.
 
 ## 配置项 (在 WebUI 插件管理中编辑)
 
@@ -97,9 +97,9 @@ astrbot_plugin_jm/
 
 ## 注意事项
 
-- 第一次执行 `/jm download` 时会初始化 jmcomic option, 可能需要数秒.
+- 第一次执行 `/jm d` 时会初始化 jmcomic option, 可能需要数秒.
 - 由于 jmcomic 是同步阻塞库, 所有网络 / 文件 IO 都通过 `asyncio.to_thread` 包装到线程池, 不会阻塞 AstrBot 主事件循环.
-- 下载完成后会参考 `astrbot_plugin_parser` 的 `Node` / `Nodes` 方式, 通过合并聊天记录主动推送漫画图集到原始会话.
+- 下载完成后会通过合并聊天记录主动推送漫画图集到原始会话.
 - 若一次下载图片过多, 会按 `max_forward_images` 拆成多条 QQ 合并聊天记录分批发送, 图片文件仍保留在下载目录.
 
 ## License
