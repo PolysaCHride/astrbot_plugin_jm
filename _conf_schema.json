@@ -5,16 +5,6 @@
     "default": "api",
     "options": ["html", "api"]
   },
-  "custom_data_dir": {
-    "description": "自定义数据目录 (高级). 留空时使用 AstrBot 默认的 plugin_data 目录. 当默认路径找不到下载文件时 (例如 /AstrBot/data/... 与实际部署路径不一致), 在此填写真实的数据目录绝对路径, 例如 /root/astrbot/data/plugin_data/astrbot_plugin_jm",
-    "type": "string",
-    "default": ""
-  },
-  "custom_domain": {
-    "description": "自定义域名 (可选, 填入后优先于内置域名)。例如: 18comic.vip",
-    "type": "string",
-    "default": ""
-  },
   "use_proxy": {
     "description": "是否使用代理",
     "type": "bool",
@@ -25,10 +15,51 @@
     "type": "string",
     "default": ""
   },
+  "max_forward_images": {
+    "description": "每条合并聊天记录(每批)最多发送的图片数。整本超过此数时自动拆成多条合并聊天记录分批发送, 不再丢弃。设为 0 (在支持此设置的平台下) 代表不限制(全部塞进单条, 若超过平台合并转发上限则可能被拒绝)。建议范围: 20-50, 过大易导致 WebSocket API 调用超时",
+    "type": "int",
+    "default": 30
+  },
+  "enable_login": {
+    "description": "是否登录 (访问收藏夹 / 高清原图时可能需要)",
+    "type": "bool",
+    "default": false
+  },
+  "username": {
+    "description": "jmcomic 登录账号 (邮箱)",
+    "type": "string",
+    "default": ""
+  },
+  "password": {
+    "description": "jmcomic 登录密码",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
   "retry_times": {
     "description": "网络请求重试次数",
     "type": "int",
     "default": 3
+  },
+  "auto_send_cover": {
+    "description": "查询本子详情时是否自动发送封面图",
+    "type": "bool",
+    "default": true
+  },
+  "max_search_results": {
+    "description": "单次搜索结果最大显示条数",
+    "type": "int",
+    "default": 10
+  },
+  "custom_data_dir": {
+    "description": "自定义数据目录 (高级). 留空时使用 AstrBot 默认的 plugin_data 目录. 当默认路径找不到下载文件时 (例如 /AstrBot/data/... 与实际部署路径不一致), 在此填写真实的数据目录绝对路径, 例如 /root/astrbot/data/plugin_data/astrbot_plugin_jm",
+    "type": "string",
+    "default": ""
+  },
+  "custom_domain": {
+    "description": "自定义域名 (可选, 填入后优先于内置域名)。例如: 18comic.vip",
+    "type": "string",
+    "default": ""
   },
   "image_thread_count": {
     "description": "同时下载图片数 (网页端建议 ≤ 50)",
@@ -55,16 +86,6 @@
     "type": "string",
     "default": "Bd / Atitle / Ptitle"
   },
-  "max_search_results": {
-    "description": "单次搜索结果最大显示条数",
-    "type": "int",
-    "default": 10
-  },
-  "max_forward_images": {
-    "description": "每条合并聊天记录(每批)最多发送的图片数。整本超过此数时自动拆成多条合并聊天记录分批发送, 不再丢弃。设为 0 (在支持此设置的平台下) 代表不限制(全部塞进单条, 若超过平台合并转发上限则可能被拒绝)。建议范围: 20-50, 过大易导致 WebSocket API 调用超时",
-    "type": "int",
-    "default": 30
-  },
   "max_album_images": {
     "description": "整本最多下载/发送的图片总数。下载前会预查本子总图片数, 超过此值直接拒绝下载, 防止误下长篇本子。0 表示不限制",
     "hint": "防止误输入长篇本子导致一直下载占用带宽/磁盘。0 表示不限制。建议结合 max_forward_images 一起设置。",
@@ -76,26 +97,5 @@
     "hint": "QQ 协议端(NapCat/Lagrange)对「转发中的转发」渲染不可靠。插件会忽略此开关, 使用更稳定也更省内存的分批发送。",
     "type": "bool",
     "default": false
-  },
-  "auto_send_cover": {
-    "description": "查询本子详情时是否自动发送封面图",
-    "type": "bool",
-    "default": true
-  },
-  "enable_login": {
-    "description": "是否登录 (访问收藏夹 / 高清原图时可能需要)",
-    "type": "bool",
-    "default": false
-  },
-  "username": {
-    "description": "jmcomic 登录账号 (邮箱)",
-    "type": "string",
-    "default": ""
-  },
-  "password": {
-    "description": "jmcomic 登录密码",
-    "type": "string",
-    "default": "",
-    "secret": true
   }
 }

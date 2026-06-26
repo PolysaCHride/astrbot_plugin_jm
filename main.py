@@ -340,23 +340,25 @@ class JMPlugin(Star):
             "------------------------\n"
             "所有命令以 /jm 开头\n"
             "\n"
-            "/jm help                       - 显示本帮助\n"
-            "/jm search <关键词>            - 搜索本子\n"
-            "/jm info <本子ID>              - 查看本子详情 (附封面)\n"
-            "/jm episodes <本子ID>          - 列出本子的全部章节\n"
-            "/jm photo <章节ID>             - 查看章节信息\n"
-            "/jm d <ID> [选择器]            - 下载本子/章节 (异步)\n"
+            " 命令              | 别名      | 说明\n"
+            " ----------------- | --------- | ----\n"
+            " /jm help          | h         | 显示本帮助\n"
+            " /jm search <词>   | sc        | 搜索本子\n"
+            " /jm info <ID>     | if        | 查看本子详情 (附封面)\n"
+            " /jm episodes <ID> | ep        | 列出本子的全部章节\n"
+            " /jm photo <ID>    | ph        | 查看章节信息\n"
+            " /jm download <ID> [选择] | d         | 下载本子/章节 (异步)\n"
             "   长本子会分批发送多条合并聊天记录\n"
             "   选择器示例:\n"
             "     all / 全部                 - 全部章节\n"
             "     1,3,5                      - 指定章节序号\n"
             "     1-10                       - 范围\n"
             "     1,3,5-10,15                - 混合格式\n"
-            "/jm cover <本子ID>             - 仅获取本子封面\n"
-            "/jm ranking [day|week|month]   - 排行榜, 默认 week\n"
-            "/jm tags <标签> [页码]         - 按标签查询\n"
-            "/jm status                     - 查看当前配置\n"
-            "/jm reload                     - 重新加载配置 (管理)\n"
+            " /jm cover <ID>    | cv        | 仅获取本子封面\n"
+            " /jm ranking [t]   | rk        | 排行榜, 默认 week\n"
+            " /jm tags <标签>   | tg        | 按标签查询\n"
+            " /jm status        | st        | 查看当前配置\n"
+            " /jm reload        | re        | 重新加载配置 (管理)\n"
             "------------------------\n"
             "提示: 本子ID 与章节ID 均为纯数字, 可在禁漫网址栏中查看."
         )
@@ -412,7 +414,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm status
     # ------------------------------------------------------------------ #
-    @jm_group.command("status", alias={"状态", "配置"})
+    @jm_group.command("status", alias={"状态", "配置", "st"})
     async def jm_status(self, event: AstrMessageEvent):
         cfg = self.config
         custom_dir = (cfg.get("custom_data_dir") or "").strip()
@@ -441,7 +443,7 @@ class JMPlugin(Star):
     # /jm reload (管理员)
     # ------------------------------------------------------------------ #
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @jm_group.command("reload", alias={"重载"})
+    @jm_group.command("reload", alias={"重载", "re"})
     async def jm_reload(self, event: AstrMessageEvent):
         try:
             await self._rebuild_option()
@@ -455,7 +457,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm search <关键词>
     # ------------------------------------------------------------------ #
-    @jm_group.command("search", alias={"搜索", "s"})
+    @jm_group.command("search", alias={"搜索", "sc"})
     async def jm_search(self, event: AstrMessageEvent, args: str = ""):
         keyword = (args or "").strip()
         if not keyword:
@@ -494,7 +496,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm info <本子ID>
     # ------------------------------------------------------------------ #
-    @jm_group.command("info", alias={"详情", "i"})
+    @jm_group.command("info", alias={"详情", "if"})
     async def jm_info(self, event: AstrMessageEvent, args: str = ""):
         aid = extract_id(args)
         if not aid:
@@ -551,7 +553,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm cover <本子ID>
     # ------------------------------------------------------------------ #
-    @jm_group.command("cover", alias={"封面", "c"})
+    @jm_group.command("cover", alias={"封面", "cv"})
     async def jm_cover(self, event: AstrMessageEvent, args: str = ""):
         aid = extract_id(args)
         if not aid:
@@ -583,7 +585,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm episodes <本子ID>
     # ------------------------------------------------------------------ #
-    @jm_group.command("episodes", alias={"章节", "e"})
+    @jm_group.command("episodes", alias={"章节", "ep"})
     async def jm_episodes(self, event: AstrMessageEvent, args: str = ""):
         aid = extract_id(args)
         if not aid:
@@ -630,7 +632,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm photo <章节ID>
     # ------------------------------------------------------------------ #
-    @jm_group.command("photo", alias={"章节详情", "p"})
+    @jm_group.command("photo", alias={"章节详情", "ph"})
     async def jm_photo(self, event: AstrMessageEvent, args: str = ""):
         pid = extract_id(args)
         if not pid:
@@ -671,9 +673,9 @@ class JMPlugin(Star):
         event.stop_event()
 
     # ------------------------------------------------------------------ #
-    # /jm d <ID> [选择器] (异步任务, 完成后主动推送)
+    # /jm download <ID> [选择器] (异步任务, 完成后主动推送)
     # ------------------------------------------------------------------ #
-    @jm_group.command("d", alias={"下载", "download"})
+    @jm_group.command("download", alias={"下载", "d"})
     async def jm_download(self, event: AstrMessageEvent, args: str = ""):
         self._ensure_runtime_attrs()
         joined = (args or "").strip()
@@ -903,7 +905,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm ranking [day|week|month]
     # ------------------------------------------------------------------ #
-    @jm_group.command("ranking", alias={"排行榜", "r"})
+    @jm_group.command("ranking", alias={"排行榜", "rk"})
     async def jm_ranking(self, event: AstrMessageEvent, args: str = ""):
         rtype = (args or "").strip().split()[0] if (args or "").strip() else "week"
         rtype = rtype.lower()
@@ -948,7 +950,7 @@ class JMPlugin(Star):
     # ------------------------------------------------------------------ #
     # /jm tags <标签> [页码]
     # ------------------------------------------------------------------ #
-    @jm_group.command("tags", alias={"标签", "t"})
+    @jm_group.command("tags", alias={"标签", "tg"})
     async def jm_tags(self, event: AstrMessageEvent, args: str = ""):
         parts = (args or "").strip().split()
         if not parts:
