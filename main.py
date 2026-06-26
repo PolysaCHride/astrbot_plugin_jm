@@ -1039,7 +1039,7 @@ class JMPlugin(Star):
 
         # 每批大小: max_forward_images 是「每条合并转发」的图片上限
         # 0 = 不限制, 全部塞进单批 (用户显式选择, 自担平台消息过大被拒绝的风险)
-        raw_max = int(self.config.get("max_forward_images", 200) or 0)
+        raw_max = int(self.config.get("max_forward_images", 30) or 0)
         batch_size = len(images) if raw_max == 0 else max(1, raw_max)
         total = len(images)
         batch_count = (total + batch_size - 1) // batch_size
