@@ -68,7 +68,7 @@ class JMPlugin(Star):
 
     使用 `command_group("jm")` 将 /jm 系列子命令组织在一起.
     支持子命令: help, status, reload, search, info, episodes, photo, cover,
-    download, ranking, tags.
+    d, ranking, tags.
     """
 
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -345,7 +345,7 @@ class JMPlugin(Star):
             "/jm info <本子ID>              - 查看本子详情 (附封面)\n"
             "/jm episodes <本子ID>          - 列出本子的全部章节\n"
             "/jm photo <章节ID>             - 查看章节信息\n"
-            "/jm download <ID> [选择器]     - 下载本子/章节 (异步)\n"
+            "/jm d <ID> [选择器]            - 下载本子/章节 (异步)\n"
             "   长本子会分批发送多条合并聊天记录\n"
             "   选择器示例:\n"
             "     all / 全部                 - 全部章节\n"
@@ -487,7 +487,7 @@ class JMPlugin(Star):
         for i, (aid, title) in enumerate(results[:max_n], 1):
             title = (title or "").replace("\n", " ").strip()
             lines.append(f"  {i:>2}. [{aid}] {title}")
-        lines.append("\n使用 /jm info <本子ID> 查看详情, /jm download <本子ID> 下载。")
+        lines.append("\n使用 /jm info <本子ID> 查看详情, /jm d <本子ID> 下载。")
         yield self._send_text(event, "\n".join(lines))
         event.stop_event()
 
@@ -623,7 +623,7 @@ class JMPlugin(Star):
             except Exception:  # noqa: BLE001
                 pid, ptitle = "?", ""
             lines.append(f"  {i:>3}. [{pid}] {safe_filename(ptitle, 60)}")
-        lines.append("\n使用 /jm download <本子ID> [选择器] 下载。")
+        lines.append("\n使用 /jm d <本子ID> [选择器] 下载。")
         yield self._send_text(event, "\n".join(lines))
         event.stop_event()
 
@@ -671,9 +671,9 @@ class JMPlugin(Star):
         event.stop_event()
 
     # ------------------------------------------------------------------ #
-    # /jm download <ID> [选择器] (异步任务, 完成后主动推送)
+    # /jm d <ID> [选择器] (异步任务, 完成后主动推送)
     # ------------------------------------------------------------------ #
-    @jm_group.command("download", alias={"下载", "d"})
+    @jm_group.command("d", alias={"下载", "download"})
     async def jm_download(self, event: AstrMessageEvent, args: str = ""):
         self._ensure_runtime_attrs()
         joined = (args or "").strip()
@@ -681,7 +681,7 @@ class JMPlugin(Star):
         if not aid:
             yield self._send_text(
                 event,
-                "用法: /jm download <本子ID|章节ID> [选择器]\n"
+                "用法: /jm d <本子ID|章节ID> [选择器]\n"
                 "  选择器: all / 1,3,5 / 1-10 / 1,3-5",
             )
             event.stop_event()
@@ -761,7 +761,7 @@ class JMPlugin(Star):
                                 f"❌ 本子 {aid} 共约 {est_total} 张图片, "
                                 f"超过上限 {max_album_images} 张, 已取消下载。\n"
                                 f"如需下载请在插件配置中调大 max_album_images, "
-                                f"或用 /jm download <ID> <章节选择器> 分章节下载。",
+                                f"或用 /jm d <ID> <章节选择器> 分章节下载。",
                             )
                             return
                         await self._send_to(
