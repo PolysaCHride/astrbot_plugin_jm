@@ -64,7 +64,7 @@ MIT © 2026 PolysaCHride - 详见 [LICENSE](LICENSE) 文件.
 | `client_impl`        | `api`                  | 客户端实现: `html` (网页端, 效率高) / `api` (APP 端, 兼容性更好)                                  |
 | `use_proxy`          | `false`                | 是否启用代理                                                                                      |
 | `proxy`              | 空                     | 代理地址, 例: `http://127.0.0.1:7890`                                                             |
-| `max_forward_images` | `30`                   | 合并聊天记录单次最多发送图片数, `0` 表示不限制。建议范围 20-50, 过大易导致 WebSocket API 调用超时 |
+| `max_forward_images` | `10`                   | 合并聊天记录单次最多发送图片数, `0` 表示不限制。建议范围 5-10 |
 | `enable_login`       | `false`                | 是否登录                                                                                          |
 | `username`           | 空                     | jmcomic 登录账号                                                                                  |
 | `password`           | 空                     | jmcomic 登录密码                                                                                  |
@@ -101,6 +101,7 @@ astrbot_plugin_jm/
 - 由于 jmcomic 是同步阻塞库, 所有网络 / 文件 IO 都通过 `asyncio.to_thread` 包装到线程池, 不会阻塞 AstrBot 主事件循环.
 - 下载完成后会通过合并聊天记录主动推送漫画图集到原始会话.
 - 若一次下载图片过多, 会按 `max_forward_images` 拆成多条 QQ 合并聊天记录分批发送, 图片文件仍保留在下载目录.
+- 合并转发只支持 QQ 个人号 `aiocqhttp` 协议端。为了避免 AstrBot 把节点内图片编码成超大 `base64://` 数据，插件会先注册图片到 AstrBot 文件服务，再把 HTTP URL 交给 NapCat 上传。请在 AstrBot **全局配置**设置 `callback_api_base`，其值必须能从 NapCat 容器访问；同一 Docker Compose 网络通常可填 `http://astrbot:6185`（将 `astrbot` 和端口替换成实际服务名与监听端口）。未配置或地址不可达时，插件会明确报错，不会发送 QQ 客户端无法展开的合并转发。
 
 ## License
 

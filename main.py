@@ -13,7 +13,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
-from astrbot.core.message.components import Image, Node, Nodes, Plain
+from astrbot.core.message.components import Image
 from astrbot.core.config import AstrBotConfig
 
 import yaml
@@ -35,6 +35,10 @@ IMAGE_SUFFIXES = {
     ".tiff",
     ".avif",
 }
+
+
+class ForwardImageTransportError(RuntimeError):
+    """无法安全地发送 QQ 合并转发图片时抛出。"""
 
 
 def extract_id(text: str) -> Optional[str]:
@@ -706,6 +710,9 @@ class JMPlugin(Star):
 
         umo = event.unified_msg_origin
         self_id = event.get_self_id()
+        platform_id = event.get_platform_id()
+        is_group = bool(event.get_group_id())
+        session_id = event.get_group_id() or event.get_sender_id()
 
         async def _task():
             try:
@@ -874,7 +881,9 @@ class JMPlugin(Star):
                     base_for_forward = matched_root
                     try:
                         await self._send_images_as_forward(
-                            umo,
+                            platform_id,
+                            session_id,
+                            is_group,
                             self_id,
                             downloaded,
                             aid,
@@ -1017,21 +1026,26 @@ class JMPlugin(Star):
 
     async def _send_images_as_forward(
         self,
-        umo: str,
+        platform_id: str,
+        session_id: str,
+        is_group: bool,
         self_id: str,
         files: Iterable[Path],
         aid: str,
         base_dir: Path,
     ) -> None:
-        """分批发送合并转发图集.
+        """通过 AstrBot 文件服务分批发送 QQ 合并转发图集。
 
-        超过单批上限 (max_forward_images) 时自动拆成多条合并聊天记录,
-        每批即时构造并发送, 避免长本子一次性创建大量 Node/Nodes 对象.
+        AstrBot v4.22.2 会把 ``Node`` 内的 ``Image``（包括 URL 图片）强制
+        序列化为 ``base64://``。大量图片 Base64 会使 NapCat/QQ 生成无法展开的
+        合并转发。因此这里将本地文件注册到 AstrBot 文件服务，直接调用 OneBot
+        ``send_*_forward_msg`` 传递 HTTP URL，绕开 ``Node.to_dict()``。
 
-        参考 astrbot_plugin_parser 的 Node/Nodes 用法.
+        ``callback_api_base`` 必须指向 NapCat 容器可访问的 AstrBot 地址。
+        相关实现：
+        https://github.com/AstrBotDevs/AstrBot/blob/v4.22.2/astrbot/core/message/components.py
+        https://github.com/NapNeko/NapCatQQ/blob/10f961c5529bcc4ac7bf53c4df0c749d766fc571/packages/napcat-onebot/action/msg/SendMsg.ts
         """
-        from astrbot.api.event import MessageChain
-
         images = sorted(
             [p for p in files if p.is_file()],
             key=self._path_sort_key,
@@ -1039,9 +1053,20 @@ class JMPlugin(Star):
         if not images:
             return
 
+        platform = self.context.get_platform_inst(platform_id)
+        if platform is None:
+            raise ForwardImageTransportError(
+                f"找不到来源平台 {platform_id!r}，无法调用 QQ 合并转发 API"
+            )
+        client = platform.get_client()
+        if not callable(getattr(client, "call_action", None)):
+            raise ForwardImageTransportError(
+                "当前平台不是支持 OneBot call_action 的 aiocqhttp 协议端"
+            )
+
         # 每批大小: max_forward_images 是「每条合并转发」的图片上限
-        # 0 = 不限制, 全部塞进单批 (用户显式选择, 自担平台消息过大被拒绝的风险)
-        raw_max = int(self.config.get("max_forward_images", 30) or 0)
+        # 0 = 不限制, 全部塞进单批 (用户显式选择, 自担 QQ 多消息大小限制的风险)
+        raw_max = int(self.config.get("max_forward_images", 10) or 0)
         batch_size = len(images) if raw_max == 0 else max(1, raw_max)
         total = len(images)
         batch_count = (total + batch_size - 1) // batch_size
@@ -1052,36 +1077,76 @@ class JMPlugin(Star):
                 f"({batch_count} 批), 避免构造嵌套合并转发导致发送慢或显示异常."
             )
 
-        def _build_batch(batch: list[Path], idx: int, first_page: int) -> Nodes:
-            nodes = Nodes([])
-            nodes.nodes.append(
-                Node(
-                    uin=self_id,
-                    name="JM 漫画下载器",
-                    content=[
-                        Plain(
-                            f"JM 图集 [{aid}]\n"
-                            f"第 {idx}/{batch_count} 批, 共 {total} 张, "
-                            f"本批 {len(batch)} 张\n来源目录: {base_dir}"
-                        )
-                    ],
-                )
-            )
-            for n, image_path in enumerate(batch, 1):
-                page_number = first_page + n - 1
-                nodes.nodes.append(
-                    Node(
-                        uin=self_id,
-                        name=f"{page_number}/{total}",
-                        content=[Image.fromFileSystem(str(image_path))],
-                    )
-                )
-            return nodes
-
         for idx, start in enumerate(range(0, total, batch_size), 1):
             batch = images[start : start + batch_size]
-            await self.context.send_message(
-                umo,
-                MessageChain(chain=[_build_batch(batch, idx, start + 1)]),
-            )
+            try:
+                image_urls = [
+                    await Image.fromFileSystem(str(image_path)).register_to_file_service()
+                    for image_path in batch
+                ]
+            except Exception as exc:  # noqa: BLE001
+                raise ForwardImageTransportError(
+                    "无法把图片注册到 AstrBot 文件服务；请在 AstrBot 全局配置设置 "
+                    "callback_api_base 为 NapCat 容器可访问的 HTTP(S) 地址"
+                ) from exc
+
+            if not all(url.startswith(("http://", "https://")) for url in image_urls):
+                raise ForwardImageTransportError(
+                    "AstrBot 文件服务返回了非 HTTP(S) 地址；请检查 callback_api_base"
+                )
+
+            messages = [
+                {
+                    "type": "node",
+                    "data": {
+                        "user_id": str(self_id),
+                        "nickname": "JM 漫画下载器",
+                        "content": [
+                            {
+                                "type": "text",
+                                "data": {
+                                    "text": (
+                                        f"JM 图集 [{aid}]\n"
+                                        f"第 {idx}/{batch_count} 批, 共 {total} 张, "
+                                        f"本批 {len(batch)} 张\n来源目录: {base_dir}"
+                                    )
+                                },
+                            }
+                        ],
+                    },
+                }
+            ]
+            for n, image_url in enumerate(image_urls, 1):
+                page_number = start + n
+                messages.append(
+                    {
+                        "type": "node",
+                        "data": {
+                            "user_id": str(self_id),
+                            "nickname": f"{page_number}/{total}",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "data": {
+                                        "file": image_url,
+                                        "url": image_url,
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                )
+
+            if is_group:
+                await client.call_action(
+                    "send_group_forward_msg",
+                    group_id=session_id,
+                    messages=messages,
+                )
+            else:
+                await client.call_action(
+                    "send_private_forward_msg",
+                    user_id=session_id,
+                    messages=messages,
+                )
             await asyncio.sleep(0)
