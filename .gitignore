@@ -1,4 +1,3 @@
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,19 +8,16 @@ __pycache__/
 build/
 dist/
 
-# 测试 / 虚拟环境
+# 测试
 .pytest_cache/
 .tox/
 .venv/
 venv/
 env/
 tests/
-
-# 环境变量
 .env
 .env.*
 
-# IDE
 .vscode/
 .idea/
 *.swp
@@ -30,8 +26,7 @@ tests/
 .DS_Store
 Thumbs.db
 
-# 日志
 *.log
 
-# 运行时数据 (由 AstrBot 在 data/plugin_data/ 生成, 不入库)
+# 运行时数据
 data/
