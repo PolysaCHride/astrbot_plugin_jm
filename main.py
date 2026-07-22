@@ -1081,12 +1081,12 @@ class JMPlugin(Star):
             batch = images[start : start + batch_size]
             try:
                 image_urls = [
-                    await Image.fromFileSystem(str(image_path)).register_to_file_service()
+                    await self._register_forward_image_url(image_path)
                     for image_path in batch
                 ]
             except Exception as exc:  # noqa: BLE001
                 raise ForwardImageTransportError(
-                    "无法把图片注册到 AstrBot 文件服务；请在 AstrBot 全局配置设置 "
+                    "无法把图片注册到 AstrBot 文件服务；请在插件或 AstrBot 全局配置设置 "
                     "callback_api_base 为 NapCat 容器可访问的 HTTP(S) 地址"
                 ) from exc
 
@@ -1150,3 +1150,22 @@ class JMPlugin(Star):
                     messages=messages,
                 )
             await asyncio.sleep(0)
+
+    async def _register_forward_image_url(self, image_path: Path) -> str:
+        """注册图片并允许插件配置覆盖 AstrBot 全局回调地址."""
+        image = Image.fromFileSystem(str(image_path))
+        callback_api_base = str(self.config.get("callback_api_base") or "").strip()
+        if not callback_api_base:
+            return await image.register_to_file_service()
+
+        callback_api_base = callback_api_base.rstrip("/")
+        try:
+            from astrbot.core import file_token_service
+
+            file_path = await image.convert_to_file_path()
+            token = await file_token_service.register_file(file_path)
+        except Exception as exc:  # noqa: BLE001
+            raise ForwardImageTransportError(
+                "无法使用插件配置的 callback_api_base 注册图片文件"
+            ) from exc
+        return f"{callback_api_base}/api/file/{token}"

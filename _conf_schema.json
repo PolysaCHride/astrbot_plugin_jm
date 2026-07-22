@@ -15,6 +15,11 @@
     "type": "string",
     "default": ""
   },
+  "callback_api_base": {
+    "description": "AstrBot 文件服务回调地址, 必须能从 NapCat 容器访问, 例如 http://astrbot:6185。留空时使用 AstrBot 全局配置中的 callback_api_base",
+    "type": "string",
+    "default": ""
+  },
   "max_forward_images": {
     "description": "每条合并聊天记录(每批)最多发送的图片数。整本超过此数时自动拆成多条合并聊天记录分批发送, 不再丢弃。图片通过 AstrBot 文件服务 URL 交给 NapCat 上传，避免 Node 内嵌 Base64。设为 0 代表不限制(可能超过 QQ 合并转发大小限制)。建议范围: 5-10",
     "type": "int",
