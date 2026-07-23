@@ -294,6 +294,72 @@ class JMPlugin(Star):
         candidates.extend(self._docker_host_mapped_paths(self.data_dir))
         return self._unique_paths(candidates)
 
+    def _photo_save_dir(self, option, album, photo) -> Optional[Path]:
+        """根据当前 dir_rule 计算某个章节的落盘目录.
+
+        直接复用 jmcomic ``DirRule.decide_image_save_dir``, 这样无论用户把
+        ``dir_rule`` 配成什么 DSL (Atitle / Aid / Ptitle / Pindex ...), 得到的都
+        是 jmcomic 自己算出的真实路径, 与实际落盘一致. 同时把 Docker 宿主机/
+        容器映射路径一起作为候选, 容器内扫描找不到时能在宿主机路径上命中.
+
+        album 可为 None (单章节下载 fallback 场景). 此时若 dir_rule 含 ``A*``
+        规则 (如 Atitle), ``decide_image_save_dir`` 会在 ``getattr(None, ...)``
+        上抛异常, 这里捕获后返回 None, 调用方据此回退到全量下载.
+        """
+        try:
+            save_dir = option.dir_rule.decide_image_save_dir(album, photo)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[JM] 计算章节保存目录失败 (photo={getattr(photo, 'photo_id', '?')}): {e}")
+            return None
+        if not save_dir:
+            return None
+        primary = Path(str(save_dir))
+        candidates = self._unique_paths(
+            [primary, *self._docker_host_mapped_paths(primary)]
+        )
+        for cand in candidates:
+            if cand.exists():
+                return cand
+        # 目录尚未创建 (章节未下载), 返回 primary 让调用方据此判定缺失
+        return primary
+
+    def _scan_photo_dir_images(self, dir_path: Optional[Path]) -> list[Path]:
+        """扫描某个章节目录下的全部图片, 按自然序返回. 目录缺失/无图片返回 []."""
+        if dir_path is None or not dir_path.exists():
+            return []
+        images = [
+            p for p in dir_path.rglob("*")
+            if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+        ]
+        return sorted(images, key=self._path_sort_key)
+
+    def _scan_cached_photos(
+        self,
+        option,
+        album,
+        photos: list,
+    ) -> tuple[list, list, list[Path]]:
+        """逐章节核对下载目录, 区分已缓存与缺失章节.
+
+        :return: (cached_photos, missing_photos, cached_images)
+          - cached_photos: 目录存在且含图片的章节对象列表
+          - missing_photos: 目录缺失或无图片的章节对象列表
+          - cached_images: 已缓存章节的图片路径 (自然序合并), 直接可用于推送
+        """
+        cached_photos: list = []
+        missing_photos: list = []
+        cached_images: list[Path] = []
+        for ph in photos:
+            save_dir = self._photo_save_dir(option, album, ph)
+            images = self._scan_photo_dir_images(save_dir)
+            if images:
+                cached_photos.append(ph)
+                cached_images.extend(images)
+            else:
+                missing_photos.append(ph)
+        cached_images = sorted(cached_images, key=self._path_sort_key)
+        return cached_photos, missing_photos, cached_images
+
     async def _ensure_option(self) -> jmcomic.JmOption:
         self._ensure_runtime_attrs()
         if self.option is None:
@@ -745,13 +811,61 @@ class JMPlugin(Star):
                     target_photos = [photo]
                     is_album = False
 
+                # ------------------------------------------------------------------
+                # 下载前缓存核对: 按 dir_rule 算出每个章节的真实落盘目录,
+                # 已存在且含图片的章节跳过下载, 缺失的章节才走下载.
+                # album_for_scan 用于精确扫描章节目录 (Atitle/Ptitle 都依赖它).
+                # ------------------------------------------------------------------
+                skip_if_cached = bool(self.config.get("skip_if_cached", True))
+                album_for_scan = target_album
+                cached_photos: list = []
+                missing_photos: list = target_photos
+                cached_images: list[Path] = []
+
+                if skip_if_cached:
+                    if is_album:
+                        try:
+                            cached_photos, missing_photos, cached_images = (
+                                self._scan_cached_photos(option, target_album, target_photos)
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(f"[JM] 缓存核对失败, 回退全量下载: {e}")
+                            missing_photos = target_photos
+                    else:
+                        # 单章节 fallback: photo.from_album 为 None, 若 dir_rule 含
+                        # A* (如 Atitle) decide_image_save_dir 会在 getattr(None,...)
+                        # 上抛异常. 这里取所属本子用于精确算目录; 失败则跳过缓存
+                        # 检测走全量下载.
+                        assoc_album = None
+                        try:
+                            assoc_album = await self._run_blocking(
+                                client.get_album_detail, target_photos[0].album_id
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(f"[JM] 单章节缓存核对取所属本子失败, 跳过缓存检测: {e}")
+                        if assoc_album is not None:
+                            album_for_scan = assoc_album
+                            try:
+                                cached_photos, missing_photos, cached_images = (
+                                    self._scan_cached_photos(
+                                        option, assoc_album, target_photos
+                                    )
+                                )
+                            except Exception as e:  # noqa: BLE001
+                                logger.warning(f"[JM] 缓存核对失败, 回退全量下载: {e}")
+                                missing_photos = target_photos
+
+                photos_to_download = missing_photos
+                all_cached = bool(cached_photos) and not photos_to_download
+
                 # 下载前预查总图片数, 超过 max_album_images 直接拒绝, 避免误下长篇
+                # (预查只针对实际需要下载的缺失章节; 已缓存章节不产生下载开销)
                 # (预查的网络请求不计入下方 t0 的下载耗时)
                 max_album_images = int(self.config.get("max_album_images", 0) or 0)
-                if max_album_images > 0:
+                if photos_to_download and max_album_images > 0:
                     try:
                         est_total = 0
-                        for ph in target_photos:
+                        for ph in photos_to_download:
                             # 优先用章节对象自身的图片数属性; 不确定时回退到迭代计数;
                             # 都拿不到时再请求详情 (额外网络开销, 仅兜底)
                             cnt = getattr(ph, "page_count", None)
@@ -767,118 +881,178 @@ class JMPlugin(Star):
                         if est_total > max_album_images:
                             await self._send_to(
                                 umo,
-                                f"❌ 本子 {aid} 共约 {est_total} 张图片, "
-                                f"超过上限 {max_album_images} 张, 已取消下载。\n"
+                                f"❌ 本子 {aid} 需补下 {len(photos_to_download)} 章, "
+                                f"共约 {est_total} 张图片, 超过上限 {max_album_images} 张, "
+                                f"已取消下载。\n"
                                 f"如需下载请在插件配置中调大 max_album_images, "
                                 f"或用 /jm d <ID> <章节选择器> 分章节下载。",
                             )
                             return
-                        await self._send_to(
-                            umo,
-                            f"⏳ 正在下载 {len(target_photos)} 个章节 (约 {est_total} 张) ...",
-                        )
                     except Exception as e:  # noqa: BLE001
-                        # 预查失败不阻断主流程, 退回只提示章节数
+                        # 预查失败不阻断主流程
                         logger.warning(f"[JM] 预查图片数失败, 跳过上限检查: {e}")
-                        await self._send_to(
-                            umo, f"⏳ 正在下载 {len(target_photos)} 个章节 ..."
-                        )
+
+                # 下载前提示: 区分全部命中 / 部分命中 / 全部缺失
+                if all_cached:
+                    await self._send_to(
+                        umo,
+                        f"✅ 本子 {aid} 已存在于下载目录, 跳过下载, 直接推送 "
+                        f"({len(target_photos)} 章, 共 {len(cached_images)} 张图片)",
+                    )
+                elif cached_photos:
+                    await self._send_to(
+                        umo,
+                        f"⏳ 本子 {aid} 部分章节已缓存 "
+                        f"({len(cached_photos)}/{len(target_photos)} 章), "
+                        f"补下缺失 {len(photos_to_download)} 章 ...",
+                    )
                 else:
                     await self._send_to(
-                        umo, f"⏳ 正在下载 {len(target_photos)} 个章节 ..."
+                        umo, f"⏳ 正在下载 {len(photos_to_download)} 个章节 ..."
                     )
 
+                # ------------------------------------------------------------------
+                # 下载 (仅缺失章节)
+                # ------------------------------------------------------------------
                 t0 = time.time()
+                if photos_to_download:
+                    def _do_download():
+                        for ph in photos_to_download:
+                            option.download_photo(ph.photo_id)
 
-                def _do_download():
-                    for ph in target_photos:
-                        option.download_photo(ph.photo_id)
-
-                await self._run_blocking(_do_download)
+                    await self._run_blocking(_do_download)
                 elapsed = time.time() - t0
 
-                # 1. 优先用 jmcomic option 的 dir_rule.base_dir 作为扫描根
-                #    (这是 jmcomic 实际写入的目录, 与 plugin_config 计算的路径可能因
-                #     容器卷挂载 / 软链接而出现差异)
-                primary_root: Optional[Path] = None
-                try:
-                    base_dir_attr = getattr(option.dir_rule, "base_dir", None)
-                    if base_dir_attr:
-                        primary_root = Path(str(base_dir_attr))
-                except Exception:  # noqa: BLE001
-                    primary_root = None
+                # ------------------------------------------------------------------
+                # 扫描: 优先按精确章节目录扫描 (缓存 + 新下载), 失败再回退到
+                # mtime 兜底扫描 (兼容 dir_rule 含 A* 但取不到 album 的场景).
+                # ------------------------------------------------------------------
+                new_images: list[Path] = []
+                if photos_to_download:
+                    try:
+                        _, _, new_images = self._scan_cached_photos(
+                            option, album_for_scan, photos_to_download
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[JM] 精确扫描新下载章节失败: {e}")
+                        new_images = []
 
-                # 2. 兜底: 用插件自身计算的下载目录
-                fallback_root = self._resolve_download_dir()
+                merged: list[Path] = []
+                seen: set[str] = set()
+                for p in (*cached_images, *new_images):
+                    key = str(p)
+                    if key not in seen:
+                        seen.add(key)
+                        merged.append(p)
+                downloaded: list[Path] = sorted(merged, key=self._path_sort_key)
+                matched_root: Optional[Path] = None
 
-                # 第一轮优先找本次新增/修改的图片; 若 jmcomic 命中缓存,
-                # 文件 mtime 可能早于本次任务, 第二轮会回退到目录内全部图片.
-                mtime_window = t0 - 300  # 5 分钟
-                downloaded: list[Path] = []
-                matched_root: Path = fallback_root
+                # 精确扫描拿不到又确实下载过 → 回退到 mtime 兜底扫描
+                if not downloaded and photos_to_download:
+                    # 1. 优先用 jmcomic option 的 dir_rule.base_dir 作为扫描根
+                    #    (这是 jmcomic 实际写入的目录, 与 plugin_config 计算的路径
+                    #     可能因容器卷挂载 / 软链接而出现差异)
+                    primary_root: Optional[Path] = None
+                    try:
+                        base_dir_attr = getattr(option.dir_rule, "base_dir", None)
+                        if base_dir_attr:
+                            primary_root = Path(str(base_dir_attr))
+                    except Exception:  # noqa: BLE001
+                        primary_root = None
 
-                target_hints = [
-                    str(getattr(target_album, "title", "") or ""),
-                    *[
-                        str(getattr(ph, "title", "") or "")
-                        for ph in target_photos
-                    ],
-                ]
-                target_hints = [hint for hint in target_hints if hint]
+                    # 2. 兜底: 用插件自身计算的下载目录
+                    fallback_root = self._resolve_download_dir()
 
-                def _is_image(path: Path) -> bool:
-                    return path.suffix.lower() in IMAGE_SUFFIXES
+                    # 第一轮优先找本次新增/修改的图片; 若 jmcomic 命中缓存,
+                    # 文件 mtime 可能早于本次任务, 第二轮会回退到目录内全部图片.
+                    mtime_window = t0 - 300  # 5 分钟
 
-                def _filter_by_target_hints(paths: list[Path]) -> list[Path]:
-                    if not target_hints:
-                        return paths
-                    filtered = [
-                        p for p in paths
-                        if any(hint in str(p) for hint in target_hints)
+                    target_hints = [
+                        str(getattr(album_for_scan, "title", "") or ""),
+                        *[
+                            str(getattr(ph, "title", "") or "")
+                            for ph in photos_to_download
+                        ],
                     ]
-                    return filtered or paths
+                    target_hints = [hint for hint in target_hints if hint]
 
-                def _scan(root: Path, recent_only: bool) -> list[Path]:
-                    found: list[Path] = []
-                    if not root or not root.exists():
-                        return found
-                    for p in root.rglob("*"):
-                        if not p.is_file() or not _is_image(p):
-                            continue
-                        if recent_only and p.stat().st_mtime < mtime_window:
-                            continue
-                        found.append(p)
-                    return _filter_by_target_hints(found)
+                    def _is_image(path: Path) -> bool:
+                        return path.suffix.lower() in IMAGE_SUFFIXES
 
-                roots_to_try = self._scan_roots(primary_root, fallback_root)
-                scan_mode = "recent"
-                for recent_only in (True, False):
-                    for root in roots_to_try:
-                        downloaded = _scan(root, recent_only)
+                    def _filter_by_target_hints(paths: list[Path]) -> list[Path]:
+                        if not target_hints:
+                            return paths
+                        filtered = [
+                            p for p in paths
+                            if any(hint in str(p) for hint in target_hints)
+                        ]
+                        return filtered or paths
+
+                    def _scan(root: Path, recent_only: bool) -> list[Path]:
+                        found: list[Path] = []
+                        if not root or not root.exists():
+                            return found
+                        for p in root.rglob("*"):
+                            if not p.is_file() or not _is_image(p):
+                                continue
+                            if recent_only and p.stat().st_mtime < mtime_window:
+                                continue
+                            found.append(p)
+                        return _filter_by_target_hints(found)
+
+                    roots_to_try = self._scan_roots(primary_root, fallback_root)
+                    scan_mode = "recent"
+                    for recent_only in (True, False):
+                        for root in roots_to_try:
+                            downloaded = _scan(root, recent_only)
+                            if downloaded:
+                                matched_root = root
+                                scan_mode = "recent" if recent_only else "cached"
+                                break
                         if downloaded:
-                            matched_root = root
-                            scan_mode = "recent" if recent_only else "cached"
                             break
-                    if downloaded:
-                        break
 
-                # 把扫描诊断信息打到日志, 方便后续调试
-                logger.info(
-                    f"[JM] 下载完成扫描: primary={primary_root}, "
-                    f"fallback={fallback_root}, data_dir={self.data_dir}, "
-                    f"roots={roots_to_try}, matched={matched_root}, mode={scan_mode}, "
-                    f"扫到 {len(downloaded)} 张图片"
-                )
+                    logger.info(
+                        f"[JM] 下载完成扫描(回退 mtime): primary={primary_root}, "
+                        f"fallback={fallback_root}, data_dir={self.data_dir}, "
+                        f"roots={roots_to_try}, matched={matched_root}, mode={scan_mode}, "
+                        f"扫到 {len(downloaded)} 张图片"
+                    )
+                else:
+                    # 精确扫描命中: 记录诊断, 并取本子根目录作为推送 base
+                    logger.info(
+                        f"[JM] 下载完成扫描(精确目录): "
+                        f"cached={len(cached_images)}, new={len(new_images)}, "
+                        f"merged={len(downloaded)} 张图片, all_cached={all_cached}"
+                    )
+                    try:
+                        primary_root = None
+                        base_dir_attr = getattr(option.dir_rule, "base_dir", None)
+                        if base_dir_attr:
+                            primary_root = Path(str(base_dir_attr))
+                        matched_root = primary_root or self._resolve_download_dir()
+                    except Exception:  # noqa: BLE001
+                        matched_root = self._resolve_download_dir()
 
+                # ------------------------------------------------------------------
+                # 完成提示 + 推送
+                # ------------------------------------------------------------------
                 total_size = sum(p.stat().st_size for p in downloaded)
-                await self._send_to(
-                    umo,
-                    f"✅ 下载完成: ID {aid} ({len(target_photos)} 章, 共 {len(downloaded)} 张图片, "
-                    f"{fmt_size(total_size)}, 耗时 {elapsed:.1f}s)",
-                )
+                if all_cached:
+                    done_msg = (
+                        f"✅ ID {aid} ({len(target_photos)} 章, 共 {len(downloaded)} 张图片, "
+                        f"{fmt_size(total_size)}, 已缓存跳过下载)"
+                    )
+                else:
+                    done_msg = (
+                        f"✅ 下载完成: ID {aid} ({len(photos_to_download)} 章补下, "
+                        f"共 {len(downloaded)} 张图片, {fmt_size(total_size)}, "
+                        f"耗时 {elapsed:.1f}s)"
+                    )
+                await self._send_to(umo, done_msg)
 
                 if downloaded:
-                    base_for_forward = matched_root
+                    base_for_forward = matched_root or self._resolve_download_dir()
                     try:
                         await self._send_images_as_forward(
                             platform_id,
@@ -897,8 +1071,18 @@ class JMPlugin(Star):
                             f"图片已保留在: {base_for_forward}",
                         )
                 else:
-                    tried = ", ".join(str(p) for p in roots_to_try)
-                    await self._send_to(umo, f"⚠️ 未发现本次下载的图片文件, 尝试过的目录: {tried}")
+                    if all_cached:
+                        # 已缓存但精确扫描未取到图片 (理论上不该发生)
+                        await self._send_to(
+                            umo,
+                            f"⚠️ 本子 {aid} 判定为已缓存但未找到图片文件, "
+                            f"请检查下载目录权限或重新下载。",
+                        )
+                    else:
+                        tried = str(self._resolve_download_dir())
+                        await self._send_to(
+                            umo, f"⚠️ 未发现本次下载的图片文件, 尝试的目录: {tried}"
+                        )
             except Exception as e:  # noqa: BLE001
                 logger.error(f"[JM] 下载任务异常: {e}", exc_info=True)
                 try:
