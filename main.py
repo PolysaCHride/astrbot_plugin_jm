@@ -8,12 +8,12 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 import astrbot.api.message_components as Comp
-from config import ConfigService
-from client import ClientService
-from download import parse_selector, scan_cached_photos, unique_images
-from forward import ForwardService
-from help_card import help_text, render_help
-from utils import extract_id, safe_filename, fmt_size, ID_PATTERN
+from .config import ConfigService
+from .client import ClientService
+from .download import parse_selector, scan_cached_photos, unique_images
+from .forward import ForwardService
+from .help_card import help_text, render_help
+from .utils import extract_id, safe_filename, fmt_size, ID_PATTERN
 
 class JMPlugin(Star):
     def __init__(self, context: Context, config):

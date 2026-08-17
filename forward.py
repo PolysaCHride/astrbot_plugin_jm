@@ -18,7 +18,7 @@ class ForwardService:
         if urlparse(str(url)).scheme not in {"http", "https"}: raise ForwardImageTransportError("文件服务返回了非 HTTP(S) 地址")
         return str(url)
     async def send(self, platform_id, session_id, is_group, self_id, files, aid, base_dir):
-        from download import unique_images
+        from .download import unique_images
         images = unique_images(files)
         if not images: return
         platform = self.plugin.context.get_platform_inst(platform_id)
