@@ -1,0 +1,23 @@
+{
+  "client_impl": {"description": "jmcomic 客户端实现", "type": "string", "default": "api", "options": ["html", "api"]},
+  "use_proxy": {"description": "是否使用代理", "type": "bool", "default": false},
+  "proxy": {"description": "代理地址", "type": "string", "default": ""},
+  "callback_api_base": {"description": "NapCat 可访问的 AstrBot 文件服务基础地址", "type": "string", "default": ""},
+  "max_forward_images": {"description": "每批合并转发的图片上限，0 为不限制", "type": "int", "default": 10},
+  "enable_login": {"description": "是否登录 jmcomic", "type": "bool", "default": false},
+  "username": {"description": "登录账号", "type": "string", "default": ""},
+  "password": {"description": "登录密码", "type": "string", "default": "", "secret": true},
+  "retry_times": {"description": "网络重试次数", "type": "int", "default": 3},
+  "auto_send_cover": {"description": "详情时发送封面", "type": "bool", "default": true},
+  "max_search_results": {"description": "最大搜索结果数", "type": "int", "default": 10},
+  "custom_data_dir": {"description": "自定义数据目录", "type": "string", "default": ""},
+  "custom_domain": {"description": "自定义域名", "type": "string", "default": ""},
+  "image_thread_count": {"description": "图片下载并发数", "type": "int", "default": 16},
+  "photo_thread_count": {"description": "章节下载并发数", "type": "int", "default": 4},
+  "image_suffix": {"description": "图片保存后缀", "type": "string", "default": ".jpg"},
+  "download_subdir": {"description": "下载子目录", "type": "string", "default": "downloads"},
+  "dir_rule": {"description": "jmcomic 目录规则", "type": "string", "default": "Bd / Atitle / Ptitle"},
+  "max_album_images": {"description": "整本图片上限，0 为不限制", "type": "int", "default": 0},
+  "skip_if_cached": {"description": "跳过已缓存章节", "type": "bool", "default": true},
+  "nested_forward": {"description": "兼容旧配置，已停用并始终使用分批转发", "type": "bool", "default": false}
+}
