@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pytest_tmp*/
+.test_tmp/
+data/
+_analysis/
+._remote_probe/
+废案v0.1/
+废案v0.2/
+

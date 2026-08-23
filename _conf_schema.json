@@ -1,0 +1,108 @@
+{
+  "client_impl": {
+    "description": "jmcomic 客户端实现。`html` 网页端 (效率高但可能限制 IP 地区), `api` APP 端 (兼容性更好)",
+    "type": "string",
+    "default": "api",
+    "options": ["html", "api"]
+  },
+  "use_proxy": {
+    "description": "是否使用代理",
+    "type": "bool",
+    "default": false
+  },
+  "proxy": {
+    "description": "代理地址, 留空使用系统代理。常见: http://127.0.0.1:7890",
+    "type": "string",
+    "default": ""
+  },
+  "max_forward_images": {
+    "description": "每条合并聊天记录(每批)最多发送的图片数。整本超过此数时自动拆成多条合并聊天记录分批发送。设为 0 代表不限制(可能超过 QQ 合并转发大小限制)。建议范围: 5-10",
+    "type": "int",
+    "default": 10
+  },
+  "forward_image_transport": {
+    "description": "合并转发中图片的传输方式。`file`: 直接把本地文件路径(file:///)交给 NapCat 读取, 本机部署最快最稳 (v2 默认); `base64`: 内嵌 base64 数据, 兼容 NapCat 与 AstrBot 不在同一台机器的场景",
+    "hint": "v2 不再使用 AstrBot 文件服务 HTTP URL 方式: 该方式依赖一次性 token, NapCat 下载失败时图片节点会被静默丢弃, 在 QQ 上显示「该类消息类型暂不支持查看」, 且每张图多一次网络下载导致打包慢。",
+    "type": "string",
+    "default": "file",
+    "options": ["file", "base64"]
+  },
+  "enable_login": {
+    "description": "是否登录 (访问收藏夹 / 高清原图时可能需要)",
+    "type": "bool",
+    "default": false
+  },
+  "username": {
+    "description": "jmcomic 登录账号 (邮箱)",
+    "type": "string",
+    "default": ""
+  },
+  "password": {
+    "description": "jmcomic 登录密码",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
+  "retry_times": {
+    "description": "网络请求重试次数",
+    "type": "int",
+    "default": 3
+  },
+  "auto_send_cover": {
+    "description": "查询本子详情时是否自动发送封面图",
+    "type": "bool",
+    "default": true
+  },
+  "max_search_results": {
+    "description": "单次搜索结果最大显示条数",
+    "type": "int",
+    "default": 10
+  },
+  "custom_data_dir": {
+    "description": "自定义数据目录 (高级). 留空时使用 AstrBot 默认的 plugin_data 目录. 当默认路径找不到下载文件时 (例如 /AstrBot/data/... 与实际部署路径不一致), 在此填写真实的数据目录绝对路径, 例如 /root/astrbot/data/plugin_data/astrbot_plugin_jm",
+    "type": "string",
+    "default": ""
+  },
+  "custom_domain": {
+    "description": "自定义域名 (可选, 填入后优先于内置域名)。例如: 18comic.vip",
+    "type": "string",
+    "default": ""
+  },
+  "image_thread_count": {
+    "description": "同时下载图片数 (网页端建议 ≤ 50)",
+    "type": "int",
+    "default": 16
+  },
+  "photo_thread_count": {
+    "description": "同时下载章节数",
+    "type": "int",
+    "default": 4
+  },
+  "image_suffix": {
+    "description": "图片保存后缀, 留空保持原格式",
+    "type": "string",
+    "default": ".jpg"
+  },
+  "download_subdir": {
+    "description": "在插件数据目录下的下载子目录名",
+    "type": "string",
+    "default": "downloads"
+  },
+  "dir_rule": {
+    "description": "下载目录命名规则 (DSL)。Bd=根目录, Axxx=本子属性, Pxxx=章节属性。常用: Bd / Atitle",
+    "type": "string",
+    "default": "Bd / Atitle / Ptitle"
+  },
+  "max_album_images": {
+    "description": "整本最多下载/发送的图片总数。下载前会预查本子总图片数, 超过此值直接拒绝下载, 防止误下长篇本子。0 表示不限制",
+    "hint": "防止误输入长篇本子导致一直下载占用带宽/磁盘。0 表示不限制。建议结合 max_forward_images 一起设置。",
+    "type": "int",
+    "default": 0
+  },
+  "skip_if_cached": {
+    "description": "下载前是否按章节检测下载目录: 已存在且含图片的章节跳过下载直接进入推送, 仅补下缺失章节。全部章节都已存在时直接推送不再发网络下载请求。",
+    "hint": "按当前 dir_rule 计算每个章节的真实落盘目录判断是否已存在。关闭后无论是否已下载都会全量重新下载。",
+    "type": "bool",
+    "default": true
+  }
+}
