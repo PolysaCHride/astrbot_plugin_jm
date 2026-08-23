@@ -24,7 +24,7 @@ from .jm_plugin.download import DownloadService
 from .jm_plugin.forward import ForwardService
 from .jm_plugin.help_card import help_markdown, help_text, render_help_card
 from .jm_plugin.scan import PhotoScanner
-from .jm_plugin.utils import ID_PATTERN, extract_id, safe_filename
+from .jm_plugin.utils import ID_PATTERN, extract_id, parse_tags_args, safe_filename
 
 
 class JMPlugin(Star):
@@ -454,30 +454,67 @@ class JMPlugin(Star):
         event.stop_event()
 
     # ------------------------------------------------------------------ #
-    # /jm tags <标签> [页码]
+    # /jm tags <标签> [页码] | <本子ID> (查看该本子的标签)
     # ------------------------------------------------------------------ #
     @jm_group.command("tags", alias={"标签", "tg"})
     async def jm_tags(self, event: AstrMessageEvent, args: str = ""):
-        parts = (args or "").strip().split()
-        if not parts:
-            yield self._send_text(event, "用法: /jm tags <标签> [页码]")
+        parsed = parse_tags_args(args)
+        if parsed is None:
+            yield self._send_text(
+                event,
+                "用法: /jm tags <标签> [页码]\n"
+                "  输入纯数字本子ID (如 /jm tags 213848) 可查看该本子的标签信息",
+            )
             event.stop_event()
             return
-        tag = parts[0]
-        page_num = 1
-        if len(parts) > 1:
-            try:
-                page_num = max(1, int(parts[1]))
-            except ValueError:
-                page_num = 1
+        mode, value, page_num = parsed
 
+        if mode == "id":
+            await self._tags_of_album(event, value)
+        else:
+            await self._tags_search(event, value, page_num)
+        event.stop_event()
+
+    async def _tags_of_album(self, event: AstrMessageEvent, target_id: str):
+        """按本子/章节 ID 查看该本子的标签信息."""
+        yield self._send_text(event, f"正在获取本子 {target_id} 的标签 ...")
+        try:
+            album = await self._call("get_album_detail", target_id)
+            if album is None:
+                # 章节 ID 兜底: 取所属本子
+                photo = await self._call("get_photo_detail", target_id, False)
+                album_id = getattr(photo, "album_id", None) if photo is not None else None
+                if album_id:
+                    album = await self._call("get_album_detail", album_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[JM] 获取本子标签失败 {target_id}: {e}", exc_info=True)
+            yield self._send_text(event, f"获取本子标签失败: {e}")
+            return
+
+        if album is None:
+            yield self._send_text(
+                event,
+                f"ID {target_id} 不是有效的本子或章节 ID。\n"
+                "如需按标签名搜索, 请使用 /jm tags <标签名>",
+            )
+            return
+
+        tags = album.tags or []
+        if not tags:
+            yield self._send_text(event, f"本子 [{target_id}] 没有标签信息")
+            return
+        lines = [f"本子 [{target_id}] {album.title} 的标签 (共 {len(tags)} 个)"]
+        lines.append("  " + ", ".join(tags))
+        yield self._send_text(event, "\n".join(lines))
+
+    async def _tags_search(self, event: AstrMessageEvent, tag: str, page_num: int):
+        """按标签名搜索本子."""
         yield self._send_text(event, f"正在查询标签: {tag} (第 {page_num} 页) ...")
         try:
             page = await self._call("search_tag", tag, page=page_num)
         except Exception as e:  # noqa: BLE001
             logger.error(f"[JM] 标签查询失败: {e}", exc_info=True)
             yield self._send_text(event, f"标签查询失败: {e}")
-            event.stop_event()
             return
 
         items: list = []
@@ -492,4 +529,3 @@ class JMPlugin(Star):
             event,
             self._result_lines(f"标签 [{tag}] 第 {page_num} 页", items, max_n),
         )
-        event.stop_event()

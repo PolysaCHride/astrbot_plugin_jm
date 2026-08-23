@@ -7,6 +7,7 @@ from jm_plugin.utils import (
     fmt_size,
     is_image,
     parse_selector,
+    parse_tags_args,
     path_sort_key,
     safe_filename,
     unique_paths,
@@ -67,3 +68,18 @@ def test_is_image():
 def test_unique_paths():
     a, b = Path("a"), Path("b")
     assert unique_paths([a, b, a, None]) == [a, b]
+
+
+def test_parse_tags_args():
+    assert parse_tags_args("") is None
+    assert parse_tags_args("   ") is None
+    # 标签名模式
+    assert parse_tags_args("巨乳") == ("tag", "巨乳", 1)
+    assert parse_tags_args("巨乳 3") == ("tag", "巨乳", 3)
+    assert parse_tags_args("巨乳 abc") == ("tag", "巨乳", 1)  # 页码非法回退 1
+    # 纯数字 ID 模式 (4 位及以上)
+    assert parse_tags_args("213848") == ("id", "213848", 1)
+    assert parse_tags_args("350234 2") == ("id", "350234", 2)
+    # 短数字按标签处理
+    assert parse_tags_args("3d") == ("tag", "3d", 1)
+    assert parse_tags_args("202") == ("tag", "202", 1)

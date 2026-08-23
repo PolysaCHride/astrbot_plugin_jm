@@ -49,7 +49,7 @@ COMMANDS: list[dict] = [
     {"name": "photo", "aliases": "ph, 章节详情", "usage": "/jm photo <章节ID>", "desc": "查看章节信息"},
     {"name": "download", "aliases": "d, 下载", "usage": "/jm d <本子ID|章节ID> [选择器]", "desc": "后台下载并推送合并转发"},
     {"name": "ranking", "aliases": "rk, 排行榜", "usage": "/jm ranking [day|week|month]", "desc": "排行榜, 默认 week"},
-    {"name": "tags", "aliases": "tg, 标签", "usage": "/jm tags <标签> [页码]", "desc": "按标签查询本子"},
+    {"name": "tags", "aliases": "tg, 标签", "usage": "/jm tags <标签> [页码]", "desc": "按标签搜索; 输入本子ID查看该本子标签"},
 ]
 
 SELECTOR_EXAMPLES: list[tuple[str, str]] = [

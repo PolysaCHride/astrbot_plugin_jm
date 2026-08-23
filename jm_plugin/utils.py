@@ -73,6 +73,28 @@ def unique_paths(paths: Iterable[Optional[Path]]) -> list[Path]:
     return unique
 
 
+def parse_tags_args(args: str) -> Optional[tuple[str, str, int]]:
+    """解析 /jm tags 参数。
+
+    - 纯数字 (4 位及以上, 本子/章节 ID) -> ("id", "213848", 1): 查看该本子的标签
+    - 其他 -> ("tag", "巨乳", page): 按标签名搜索本子
+    - 空输入 / 无有效内容 -> None (调用方返回用法提示)
+    """
+    parts = (args or "").strip().split()
+    if not parts:
+        return None
+    first = parts[0]
+    page = 1
+    if len(parts) > 1:
+        try:
+            page = max(1, int(parts[1]))
+        except ValueError:
+            page = 1
+    if first.isdigit() and len(first) >= 4:
+        return "id", first, page
+    return "tag", first, page
+
+
 def parse_selector(selector: str, total: int) -> list[int]:
     """解析章节选择器: \"all\" / \"1,3,5-10\" -> 1-based 序号列表."""
     s = (selector or "").strip().lower()
