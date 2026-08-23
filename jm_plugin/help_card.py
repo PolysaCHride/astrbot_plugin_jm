@@ -500,8 +500,13 @@ def render_help_card(
         return None
     markdown = markdown or help_markdown()
     cache_dir = Path(cache_dir)
+    # 内置字体纳入缓存键: 字体变更 (重新子集化) 后旧卡片自动失效
+    bundled_font = _ASSETS_DIR / "help_font_regular.otf"
+    font_sig = bundled_font.stat().st_size if bundled_font.exists() else 0
     key = hashlib.sha1(
-        f"{markdown}{chr(10)}{width}{chr(10)}{PLUGIN_VERSION}".encode("utf-8")
+        f"{markdown}{chr(10)}{width}{chr(10)}{PLUGIN_VERSION}{chr(10)}{font_sig}".encode(
+            "utf-8"
+        )
     ).hexdigest()[:16]
     out_path = cache_dir / f"help_{key}.png"
     if out_path.exists():
