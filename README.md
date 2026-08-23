@@ -40,6 +40,13 @@ v2 直接构造 OneBot 转发 payload, 支持两种传输方式 (配置项 `forw
 - `file` (默认): 传 `file:///` 本地路径, NapCat 本机直读零下载, 最快最稳, 适合 NapCat 与 AstrBot 同一台机器 (含 Windows 本机部署);
 - `base64`: 内嵌 base64 数据, 适合 NapCat 在其他机器/容器运行、无共享文件系统的场景。
 
+## /jm help 帮助卡片的中文字体
+
+帮助卡片由插件内置的 [Noto Sans CJK SC](https://github.com/notofonts/noto-cjk) 子集字体渲染 (SIL OFL 1.1 许可, 见 `jm_plugin/assets/OFL.txt`), 因此即使运行环境没有安装中文字体 (例如精简 Linux 容器) 也能正常显示中文。
+
+- 自定义帮助文案后运行 `python tools/make_help_font.py` 重新生成子集字体 (`fontTools` 为开发依赖);
+- 也可将任意中文字体放到 AstrBot data 目录并命名为 `font.ttf`, 渲染时会优先使用。
+
 ## 配置项
 
 见 `_conf_schema.json`。常用项:
@@ -63,8 +70,10 @@ jm_plugin/
   scan.py               下载目录扫描与缓存核对
   forward.py            合并转发推送 (file / base64)
   help_card.py          /jm help markdown 卡片
+  help_card.py  + assets/   内置 Noto 子集中文字体 (SIL OFL 1.1)
   download.py           后台下载任务编排
 tests/                 单元测试
+tools/make_help_font.py        重新生成子集字体
 ```
 
 ## 测试

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -129,18 +130,103 @@ _CODE_FILL = (232, 240, 254)
 _CODE_TEXT = (27, 91, 178)
 _ACCENT = (31, 111, 235)
 
-_BOLD_FONTS = ("msyhbd.ttc", "simhei.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf")
-_REGULAR_FONTS = ("msyh.ttc", "simhei.ttf", "simsun.ttc", "arial.ttf", "DejaVuSans.ttf")
+# 插件内置的子集中文字体 (Noto Sans CJK SC, SIL OFL 1.1), 保证任何环境都能渲染中文
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+# 系统字体搜索目录: Windows / Linux / macOS 常见位置
+_SYSTEM_FONT_DIRS = [
+    str(Path((os.environ.get("WINDIR") or "C:/Windows")) / "Fonts"),
+    "/usr/share/fonts/opentype/noto",
+    "/usr/share/fonts/truetype/noto",
+    "/usr/share/fonts/noto-cjk",
+    "/usr/share/fonts/opentype/noto-cjk",
+    "/usr/share/fonts/truetype/wqy",
+    "/usr/share/fonts/truetype/arphic",
+    "/usr/share/fonts/truetype/droid",
+    "/usr/share/fonts",
+    "/usr/local/share/fonts",
+    str(Path.home() / ".fonts"),
+    str(Path.home() / ".local/share/fonts"),
+    "/System/Library/Fonts",
+    "/System/Library/Fonts/Supplemental",
+    "/Library/Fonts",
+]
+
+# 各平台常见的中文字体文件名
+_CJK_FONT_FILES = {
+    "regular": (
+        "msyh.ttc", "simhei.ttf", "simsun.ttc", "Deng.ttf", "msyhl.ttc",
+        "NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf",
+        "SourceHanSansCN-Regular.otf", "source-han-sans-cn-regular.otf",
+        "wqy-zenhei.ttc", "wqy-microhei.ttc", "WenQuanYi Zen Hei.ttc",
+        "PingFang.ttc", "Hiragino Sans GB.ttc", "STHeiti Light.ttc",
+        "Arial Unicode.ttf", "Songti.ttc", "uming.ttc", "ukai.ttc",
+    ),
+    "bold": (
+        "msyhbd.ttc", "simhei.ttf",
+        "NotoSansCJK-Bold.ttc", "NotoSansCJKsc-Bold.otf", "NotoSansSC-Bold.otf",
+        "SourceHanSansCN-Bold.otf", "WenQuanYi Zen Hei.ttc", "PingFang.ttc",
+        "NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular.otf",
+    ),
+}
+
+# 字体族名含这些标记才认为支持中文 (防止回退到 Aileron 等纯拉丁字体)
+_CJK_FONT_MARKERS = (
+    "yahei", "simhei", "simsun", "dengxian", "jhenghei", "kaiti", "fangsong",
+    "cjk", "source han", "wenquanyi", "wqy", "pingfang", "hiragino", "songti",
+    "heiti", "arphic", "uming", "ukai", "sarasa", "lxgw", "ms gothic",
+    "meiryo", "yu gothic", "malgun", "microsoft yahei", "noto sans sc",
+)
+
+
+def _system_font_candidates(bold: bool = False) -> list[str]:
+    """生成系统 CJK 字体候选路径: 目录×文件名 + 裸名 + AstrBot data/font.ttf."""
+    files = _CJK_FONT_FILES["bold" if bold else "regular"]
+    paths = [str(Path(d) / f) for d in _SYSTEM_FONT_DIRS for f in files]
+    paths.extend(files)  # 裸名 (部分 Pillow 版本可解析)
+    try:
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+
+        paths.insert(0, str(Path(get_astrbot_data_path()) / "font.ttf"))
+    except Exception:  # noqa: BLE001
+        pass
+    seen: set[str] = set()
+    unique: list[str] = []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+    return unique
 
 
 def _load_font(size: int, bold: bool = False):
-    """按优先级加载可用的中文字体."""
-    names = _BOLD_FONTS if bold else _REGULAR_FONTS
-    for name in names:
+    """加载支持中文的字体。
+
+    优先级:
+    1. 插件内置子集字体 (Noto Sans CJK SC, 任何环境都能渲染卡中文);
+    2. 系统 CJK 字体 (Windows / Linux / macOS 常见位置 + AstrBot data/font.ttf);
+    3. PIL 默认字体 (纯拉丁, 仅兜底并记录 warning)。
+    """
+    bundled = _ASSETS_DIR / ("help_font_bold.otf" if bold else "help_font_regular.otf")
+    try:
+        if bundled.exists():
+            return ImageFont.truetype(str(bundled), size)
+    except OSError:
+        pass
+
+    for path in _system_font_candidates(bold):
         try:
-            return ImageFont.truetype(name, size)
+            font = ImageFont.truetype(path, size)
         except OSError:
             continue
+        family = (font.getname()[0] or "").lower()
+        if any(marker in family for marker in _CJK_FONT_MARKERS):
+            return font
+
+    _logger().warning(
+        "[JM] 未找到支持中文的字体, 帮助卡片中文可能显示为方框; "
+        "插件已内置子集中文字体, 若仍异常请检查 jm_plugin/assets 目录是否完整。"
+    )
     return ImageFont.load_default()
 
 

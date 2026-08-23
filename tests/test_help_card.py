@@ -37,6 +37,36 @@ def test_parse_blocks_table_and_sections():
     assert len(table[1]) == len(help_card.COMMANDS) + 1
 
 
+def test_bundled_cjk_fonts_exist():
+    assert (help_card._ASSETS_DIR / "help_font_regular.otf").exists()
+    assert (help_card._ASSETS_DIR / "help_font_bold.otf").exists()
+    assert (help_card._ASSETS_DIR / "OFL.txt").exists()
+
+
+@pytest.mark.skipif(help_card.Image is None, reason="Pillow 不可用")
+def test_load_font_uses_bundled_cjk_font():
+    font = help_card._load_font(24)
+    family, style = font.getname()
+    assert "Noto" in family  # 内置子集字体优先于系统字体
+    assert style in ("Regular", "Bold")
+    bold_font = help_card._load_font(24, bold=True)
+    assert "Bold" in "".join(bold_font.getname())
+
+
+@pytest.mark.skipif(help_card.Image is None, reason="Pillow 不可用")
+def test_all_help_chars_covered_by_bundled_font():
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        pytest.skip("fontTools 不可用")
+
+    cmap = TTFont(str(help_card._ASSETS_DIR / "help_font_regular.otf")).getBestCmap()
+    text = help_card.help_markdown() + help_card.help_text()
+    covered = {ch for ch in text if ch == "\n" or ord(ch) in cmap}
+    missing = [ch for ch in set(text) if ch not in covered]
+    assert missing == [], f"帮助文案包含子集字体未覆盖的字符: {missing}"
+
+
 @pytest.mark.skipif(help_card.Image is None, reason="Pillow 不可用")
 def test_render_help_card_produces_png(tmp_path):
     from PIL import Image
