@@ -469,10 +469,13 @@ class JMPlugin(Star):
             return
         mode, value, page_num = parsed
 
+        # 辅助函数是异步生成器 (含 "正在..." 提示与结果), 需用 async for 委派
         if mode == "id":
-            await self._tags_of_album(event, value)
+            async for result in self._tags_of_album(event, value):
+                yield result
         else:
-            await self._tags_search(event, value, page_num)
+            async for result in self._tags_search(event, value, page_num):
+                yield result
         event.stop_event()
 
     async def _tags_of_album(self, event: AstrMessageEvent, target_id: str):
