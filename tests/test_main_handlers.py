@@ -45,6 +45,7 @@ def _module():
 class _FakeEvent:
     def __init__(self):
         self.stopped = False
+        self.unified_msg_origin = "umo:test"
 
     def plain_result(self, text):
         return text
@@ -54,6 +55,18 @@ class _FakeEvent:
 
     def stop_event(self):
         self.stopped = True
+
+    def get_self_id(self):
+        return "10000"
+
+    def get_platform_id(self):
+        return "aiocqhttp"
+
+    def get_group_id(self):
+        return "123456"
+
+    def get_sender_id(self):
+        return "999999"
 
 
 def _make_plugin(calls):
@@ -184,3 +197,40 @@ def test_tags_empty_args_shows_usage():
 @pytest.mark.skipif(sys.version_info < (3, 8), reason="需要命名空间包支持")
 def test_namespace_import_module_name():
     assert _module().__name__ == "jm_main_under_test.main"
+
+
+def test_download_pass_single_arg_push_callback():
+    """回归: push 回调必须是单参数 callable (曾误传 _push_text 双参方法)."""
+    mod = _module()
+    plugin = mod.JMPlugin.__new__(mod.JMPlugin)
+
+    captured: dict = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["push"] = kwargs["push"]
+
+        async def _noop():
+            pass
+
+        return _noop()
+
+    async def fake_send_message(umo, chain):
+        captured["sent"] = (umo, str(chain))
+
+    plugin.downloader = SimpleNamespace(run=fake_run)
+    plugin._spawn_task = lambda coro: captured.__setitem__("coro", coro)
+    plugin._send_text = lambda event, text: text
+    plugin.context = SimpleNamespace(send_message=fake_send_message)
+
+    event = _FakeEvent()
+    results = asyncio.run(_collect(plugin.jm_download(event, "213848 1-2")))
+    text = chr(10).join(str(r) for r in results)
+    assert "已开始下载 ID 213848" in text
+    assert event.stopped
+    # run 收到的参数: (aid, selector, umo, platform_id, session_id, is_group, self_id)
+    assert captured["args"][:3] == ("213848", "1-2", "umo:test")
+    # push 必须是单参数 callable (旧代码直接传 _push_text 会在调用时抛 TypeError)
+    push = captured["push"]
+    asyncio.run(push("测试进度"))
+    assert captured["sent"][0] == "umo:test"

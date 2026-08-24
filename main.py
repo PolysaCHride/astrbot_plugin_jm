@@ -419,10 +419,11 @@ class JMPlugin(Star):
         is_group = bool(event.get_group_id())
         session_id = event.get_group_id() or event.get_sender_id()
 
+        # DownloadService 以单参数回调 push(text) 推送进度; 这里把 umo 绑定进去
         self._spawn_task(
             self.downloader.run(
                 aid, selector, umo, platform_id, session_id, is_group, self_id,
-                push=self._push_text,
+                push=lambda text: self._push_text(umo, text),
             )
         )
         event.stop_event()
