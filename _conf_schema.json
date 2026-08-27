@@ -27,6 +27,32 @@
     "default": "file",
     "options": ["file", "base64"]
   },
+  "forward_compress": {
+    "description": "合并转发前并发压缩大图 (v3 提速默认开启)。长边超限/大体积的漫画页图会缩放并重压缩为 JPEG, 显著缩短 NapCat 上传时间; 小体积 JPEG、GIF 动图与坏图自动原图直传。",
+    "type": "bool",
+    "default": true
+  },
+  "forward_compress_max_edge": {
+    "description": "压缩时图片长边像素上限, 超过则等比缩小。0 表示不缩放仅转码。2048 足够手机端清晰观看。",
+    "type": "int",
+    "default": 2048
+  },
+  "forward_compress_quality": {
+    "description": "JPEG 压缩质量 (1-95), 数字越大越清晰、体积也越大。85 为清晰度与速度的平衡点。重压缩后反而更大时会自动回退原图。",
+    "type": "int",
+    "default": 85
+  },
+  "forward_cache_enabled": {
+    "description": "是否持久缓存压缩产物。同一本子二次推送直接复用缓存瞬时完成, 代价是占用额外磁盘空间。缓存位于插件数据目录 forward_cache/<ID>/ 下, 不影响原始下载文件。",
+    "hint": "想关闭压缩可以只关 forward_compress; 若两者都关闭则每条合并转发均直接发送原图。",
+    "type": "bool",
+    "default": true
+  },
+  "forward_cache_days": {
+    "description": "压缩缓存有效期 (天), 每次推送前自动清理过期缓存。0 表示永不过期。",
+    "type": "int",
+    "default": 7
+  },
   "enable_login": {
     "description": "是否登录 (访问收藏夹 / 高清原图时可能需要)",
     "type": "bool",

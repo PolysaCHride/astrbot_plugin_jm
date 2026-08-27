@@ -8,6 +8,9 @@
 - 本实现绕开文件服务直接构造 OneBot payload:
     transport=file   (默认): 传 file:/// 本地路径, NapCat 本机直读, 最快最稳;
     transport=base64 : 内嵌 base64:// 数据, 兼容 NapCat 在其他机器的场景。
+- v3 打包提速 (参照 astrbot_plugin_parser 的思路): 发送前先把全部图片并发
+  预处理一遍 (大图缩放重压缩 + 指纹持久缓存复用, 见 compress.py), 发送循环
+  内不再做任何重活; NapCat 上传耗时与图片字节量成正比, 因此压缩是主要提速点。
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from .compress import PrepareStats, log_stats, prepare_images
 from .utils import path_sort_key, unique_paths
 
 try:
@@ -61,6 +65,28 @@ class ForwardService:
         return value if value in self._TRANSPORTS else "file"
 
     # ---------------------------------------------------------------- #
+    # 预处理
+    # ---------------------------------------------------------------- #
+    async def _prepare(self, images: list[Path], aid: str) -> tuple[PrepareStats, float]:
+        """发送前全量并发预处理: 大图压缩 + 缓存复用 (compress.py)。"""
+        cfg = self.config_service
+        enabled = bool(cfg.get_bool("forward_compress", True))
+        prep_t0 = time.time()
+        stats = await prepare_images(
+            images,
+            cache_dir=cfg.data_dir / "forward_cache",
+            aid=aid,
+            enabled=enabled,
+            use_cache=cfg.get_bool("forward_cache_enabled", True),
+            max_edge=cfg.get_int("forward_compress_max_edge", 2048),
+            quality=cfg.get_int("forward_compress_quality", 85),
+            clean_ttl_days=cfg.get_int("forward_cache_days", 7),
+        )
+        prep_elapsed = time.time() - prep_t0
+        log_stats(stats, prep_elapsed, self.logger)
+        return stats, prep_elapsed
+
+    # ---------------------------------------------------------------- #
     # 对外入口
     # ---------------------------------------------------------------- #
     async def send(
@@ -76,14 +102,24 @@ class ForwardService:
     ) -> dict:
         """把本地图片分批打包为 QQ 合并转发消息并发送。
 
-        :return: 统计信息 {images, batches, transport, elapsed}
+        :return: 统计信息 {images, batches, transport, elapsed, 压缩/缓存统计}
         """
         images = sorted(
             [p for p in unique_paths(files) if p.is_file() and p.stat().st_size > 0],
             key=path_sort_key,
         )
         if not images:
-            return {"images": 0, "batches": 0, "transport": self.transport, "elapsed": 0.0}
+            return {
+                "images": 0,
+                "batches": 0,
+                "transport": self.transport,
+                "elapsed": 0.0,
+                "compressed": 0,
+                "cache_hits": 0,
+                "prep_elapsed": 0.0,
+                "bytes_before": 0,
+                "bytes_after": 0,
+            }
 
         platform = self.context.get_platform_inst(platform_id) if self.context else None
         if platform is None:
@@ -95,6 +131,10 @@ class ForwardService:
             raise ForwardImageTransportError(
                 "当前平台不是支持 OneBot call_action 的 aiocqhttp 协议端"
             )
+
+        # 发送前把全部图片并发处理完 (压缩/缓存命中), 之后循环只做纯发送
+        prep_stats, prep_elapsed = await self._prepare(images, aid)
+        images = prep_stats.paths
 
         # 每批大小: max_forward_images 是「每条合并转发」的图片上限,
         # 0 = 不限制, 全部塞进单批 (用户显式选择, 自担 QQ 多消息大小限制的风险)
@@ -122,9 +162,20 @@ class ForwardService:
         elapsed = time.time() - t0
         self.logger.info(
             f"[JM] 合并转发已发送: {total} 张图片 / {batch_count} 批, "
-            f"transport={self.transport}, 耗时 {elapsed:.1f}s"
+            f"transport={self.transport}, 耗时 {elapsed:.1f}s "
+            f"(预处理: 新压缩 {prep_stats.compressed}, 缓存命中 {prep_stats.cache_hits})"
         )
-        return {"images": total, "batches": batch_count, "transport": self.transport, "elapsed": elapsed}
+        return {
+            "images": total,
+            "batches": batch_count,
+            "transport": self.transport,
+            "elapsed": elapsed,
+            "compressed": prep_stats.compressed,
+            "cache_hits": prep_stats.cache_hits,
+            "prep_elapsed": round(prep_elapsed, 2),
+            "bytes_before": prep_stats.bytes_before,
+            "bytes_after": prep_stats.bytes_after,
+        }
 
     # ---------------------------------------------------------------- #
     # payload 构造

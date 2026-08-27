@@ -168,6 +168,13 @@ class JMPlugin(Star):
                 f"  下载目录: {cfg.download_dir()}",
                 f"  图片并发: {cfg.get_int('image_thread_count', 16)}, 章节并发: {cfg.get_int('photo_thread_count', 4)}",
                 f"  每批合并转发上限: {cfg.get_int('max_forward_images', 10)} 张, 传输方式: {self.forwarder.transport}",
+                (
+                    f"  转发图片压缩: 开 (长边 {cfg.get_int('forward_compress_max_edge', 2048) or '不限'}px, "
+                    f"质量 {cfg.get_int('forward_compress_quality', 85)}, "
+                    f"缓存 {'开/' + str(cfg.get_int('forward_cache_days', 7)) + '天' if cfg.get_bool('forward_cache_enabled', True) else '关'})"
+                    if cfg.get_bool("forward_compress", True)
+                    else "  转发图片压缩: 关 (发送原图)"
+                ),
                 f"  整本图片上限: {cfg.get_int('max_album_images', 0) or '不限'}",
                 f"  缓存跳过: {'是' if cfg.get_bool('skip_if_cached', True) else '否'}",
                 f"  图片后缀: {cfg.get_str('image_suffix') or '原格式'}",
